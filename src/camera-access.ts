@@ -15,7 +15,7 @@ export function cameraPreflight(context:CameraContext){
 }
 export function cameraError(error:unknown,context:CameraContext){
  const name=error&&typeof error==='object'&&'name'in error?String(error.name):'';
- if(name==='NotAllowedError'||name==='PermissionDeniedError')return context.embedded?'Camera permission was blocked. Open the camera page in a new browser tab, then tap Enable camera.':context.chromeIOS?'Camera permission was blocked (NotAllowedError). On iPhone, open Settings → Privacy & Security → Camera and enable Chrome. Also check the camera icon in Chrome’s address bar, if shown. Then return and tap Enable camera.':context.ios?'Camera permission was blocked (NotAllowedError). Allow camera access in your browser’s site settings and iPhone Settings, then tap Enable camera again.':'Camera permission was blocked (NotAllowedError). Allow camera access in your browser’s site settings and device settings, then tap Enable camera again.';
+ if(name==='NotAllowedError'||name==='PermissionDeniedError')return context.embedded?'Camera permission was blocked. Open the camera page in a new browser tab, then tap Start camera.':context.chromeIOS?'Camera permission was blocked (NotAllowedError). On iPhone, open Settings → Privacy & Security → Camera and enable Chrome. Also check the camera icon in Chrome’s address bar, if shown. Then return and tap Start camera.':context.ios?'Camera permission was blocked (NotAllowedError). Allow camera access in your browser’s site settings and iPhone Settings, then tap Start camera again.':'Camera permission was blocked (NotAllowedError). Allow camera access in your browser’s site settings and device settings, then tap Start camera again.';
  if(name==='NotFoundError'||name==='DevicesNotFoundError')return 'No camera is available (NotFoundError). Check that camera access is enabled on this device.';
  if(name==='NotReadableError'||name==='TrackStartError')return 'The camera could not start (NotReadableError). Close other camera apps or calls, then retry.';
  if(name==='OverconstrainedError')return 'This camera cannot use the requested settings. Select Automatic lens and a lower resolution, then retry.';
@@ -40,7 +40,7 @@ export async function requestCamera(settings:Settings,signal:AbortSignal,onStatu
  cameraPreflight(context);
  const [width,height]=settings.resolution.split('x').map(Number),portrait=settings.orientation==='portrait';
  const video:MediaTrackConstraints={width:{ideal:portrait?height:width},height:{ideal:portrait?width:height},frameRate:{ideal:30},...(settings.deviceId?{deviceId:{exact:settings.deviceId}}:{facingMode:{ideal:settings.facing}})};
- const hint=setTimeout(()=>{if(!signal.aborted)onStatus('Waiting for camera permission. If no prompt appears, open Camera help below. You can cancel and retry.',true)},8000);
+ const hint=setTimeout(()=>{if(!signal.aborted)onStatus('Waiting for camera permission. If no prompt appears, check the camera permission in the browser site settings. You can cancel and retry.',true)},8000);
  try{
   let stream:MediaStream;
   try{stream=await requestOnce({audio:false,video},signal)}catch(error){

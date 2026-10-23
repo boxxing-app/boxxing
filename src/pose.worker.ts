@@ -3,6 +3,8 @@ import type {Variant} from './types';
 import {fetchAsset,type LoadProgress} from './asset-loader';
 import {wasmOptions} from './wasm-bootstrap';
 const origin=self.location.origin;
+// Vite's base ('/' locally, '/<repo>/' on GitHub Pages), as an absolute URL ending in '/'.
+const base=new URL(import.meta.env.BASE_URL,origin).href;
 const originalFetch=self.fetch.bind(self);
 self.fetch=(input:RequestInfo|URL,init?:RequestInit)=>{const url=new URL(input instanceof Request?input.url:String(input),origin);if(url.origin!==origin)return Promise.reject(new Error('External connections are disabled'));return originalFetch(input,init)};
 const oldOpen=XMLHttpRequest.prototype.open;
@@ -15,20 +17,20 @@ async function initialize(variant:Variant,delegate:'GPU'|'CPU'){
  if(!['lite','full','heavy'].includes(variant))throw new Error('Unknown model variant.');
  if(typeof OffscreenCanvas==='undefined')throw new Error('This browser does not support the camera tracker in a worker. Please use current Android Chrome.');
  model?.close();let cache:Cache|null=null;try{cache=await caches.open('boxxxing-tracker-mediapipe-1.1.1-r1')}catch{}
- const manifestBytes=await fetchAsset(origin+'/models/manifest.json',{label:'Reading model list',onProgress:progress});
+ const manifestBytes=await fetchAsset(base+'models/manifest.json',{label:'Reading model list',onProgress:progress});
  const manifest=JSON.parse(new TextDecoder().decode(manifestBytes)),item=manifest[variant];
  if(!item||!Array.isArray(item.parts)||!Number.isFinite(item.bytes))throw new Error('The model list is invalid. Reload the site.');
  const buffers:Uint8Array[]=[];
  for(let i=0;i<item.parts.length;i++){
   const name=item.parts[i];if(typeof name!=='string'||!/^\w+-\d+\.bin$/.test(name))throw new Error('Invalid model asset path.');
   const expected=Math.min(8*1024*1024,item.bytes-i*8*1024*1024);
-  buffers.push(await fetchAsset(origin+'/models/'+name,{label:`Downloading ${variant} model (${i+1}/${item.parts.length})`,expectedBytes:expected,onProgress:progress,cache}));
+  buffers.push(await fetchAsset(base+'models/'+name,{label:`Downloading ${variant} model (${i+1}/${item.parts.length})`,expectedBytes:expected,onProgress:progress,cache}));
  }
  const buffer=new Uint8Array(item.bytes);let offset=0;for(const p of buffers){buffer.set(p,offset);offset+=p.length}
  progress({phase:'verify',message:'Checking the model download…'});
  const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))).map(x=>x.toString(16).padStart(2,'0')).join('');
- if(digest!==item.sha256){await Promise.all(item.parts.map((name:string)=>cache?.delete(origin+'/models/'+name)));throw new Error('Model download was corrupted. Cached copy cleared; tap Enable camera to retry.')}
- const files=await FilesetResolver.forVisionTasks(origin+'/mediapipe',true);
+ if(digest!==item.sha256){await Promise.all(item.parts.map((name:string)=>cache?.delete(base+'models/'+name)));throw new Error('Model download was corrupted. Cached copy cleared; tap Start camera to retry.')}
+ const files=await FilesetResolver.forVisionTasks(base+'mediapipe',true);
  const binary=await fetchAsset(files.wasmBinaryPath,{label:'Downloading tracking engine',onProgress:progress,cache});
  progress({phase:'compile',message:'Preparing the tracking engine…'});
  let compiled:WebAssembly.Module;

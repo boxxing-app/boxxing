@@ -75,4 +75,3 @@ export class Tracker{
 }
 export let tilt:Tilt|null=null;
 export async function enableTilt(){type OrientationConstructor=typeof DeviceOrientationEvent&{requestPermission?:()=>Promise<string>};const C=globalThis.DeviceOrientationEvent as OrientationConstructor|undefined;if(!C)return false;if(C.requestPermission&&await C.requestPermission()!=='granted')return false;window.addEventListener('deviceorientation',e=>{tilt={alpha:e.alpha,beta:e.beta,gamma:e.gamma,screenAngle:screen.orientation?.angle??0,at:performance.now()}});return true}
-export function screenTilt(t:Tilt|null){if(!t||t.beta===null||t.gamma===null)return null;const b=t.beta*Math.PI/180,g=t.gamma*Math.PI/180;return Math.asin(Math.max(-1,Math.min(1,Math.cos(b)*Math.cos(g))))*180/Math.PI}

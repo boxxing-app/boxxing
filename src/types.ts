@@ -1,19 +1,18 @@
 export type Point={x:number;y:number;z:number;visibility?:number;presence?:number};
 export type Variant='lite'|'full'|'heavy';
+export type Facing='user'|'environment';
 export type FilterSettings={minCutoff:number;beta:number;dCutoff:number};
-export type Settings={angle:number;height:number;distance:number;orientation:'landscape'|'portrait';stance:'orthodox'|'southpaw';model:Variant;resolution:string;facing:'user'|'environment';deviceId:string;cameraLabel:string;filter:FilterSettings;recordVideo:boolean;stage:string;envelopeChecked:boolean};
+/** What the tracker needs to open the camera and load a model. */
+export type Settings={model:Variant;resolution:string;facing:Facing;deviceId:string;orientation:'landscape'|'portrait'};
 export type Tilt={alpha:number|null;beta:number|null;gamma:number|null;screenAngle:number;at:number};
-export type Cue={id:string;text:string;seconds:number;count?:number;kind:'hold'|'punch'|'head'|'step';side?:'lead'|'rear'};
-export type CueTime={id:string;start:number;end:number};
 export type RigData={rotations:Record<string,number[]>;world:Record<number,Point>;projected:Record<number,Point>;projection:{scale:number;tx:number;ty:number}|null};
-export type Frame={t:number;captureTime:number|null;mediaTime:number;cue:string;raw2d:Point[];rawWorld:Point[];smooth2d:Point[];smoothWorld:Point[];rig:RigData|null;inferenceMs:number;fps:number;pipelineMs:number;captureToSubmitMs:number|null;tilt:Tilt|null;presentedFrames:number|null};
-export type Session={schemaVersion:1;id:string;createdAt:string;settings:Settings;device:{userAgent:string;platform:string;camera:MediaTrackSettings|null;delegate:string;runtime:string};frames:Frame[];cues:CueTime[];duration:number;complete:boolean;synthetic:boolean;notes:string[];rigCalibration:Record<string,number>|null;videoAvailable:boolean;metrics?:Metrics};
-export type MetricMap=Record<string,number|null>;
-export type Metrics={values:MetricMap;perCue:Record<string,MetricMap>;scores:MetricMap};
 export const KEYS=[0,11,12,13,14,15,16,23,24,25,26,27,28];
-export const NAMES:Record<number,string>={0:'Nose',11:'Left shoulder',12:'Right shoulder',13:'Left elbow',14:'Right elbow',15:'Left wrist',16:'Right wrist',23:'Left hip',24:'Right hip',25:'Left knee',26:'Right knee',27:'Left ankle',28:'Right ankle'};
-export const BONES:[number,number,string][]=[[11,13,'leftUpperArm'],[13,15,'leftForearm'],[12,14,'rightUpperArm'],[14,16,'rightForearm'],[23,25,'leftThigh'],[25,27,'leftShin'],[24,26,'rightThigh'],[26,28,'rightShin'],[11,12,'shoulderWidth']];
-export const LINKS:[number,number][]=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32],[0,7],[0,8]];
-export const DEFAULT_SETTINGS:Settings={angle:0,height:.9,distance:3,orientation:'landscape',stance:'orthodox',model:'full',resolution:'1280x720',facing:'environment',deviceId:'',cameraLabel:'Rear camera',filter:{minCutoff:1,beta:.04,dCutoff:1},recordVideo:false,stage:'A',envelopeChecked:false};
-export const DEFAULT_WEIGHTS:Record<string,number>={rig:20,punch:20,bones:15,known:15,reliability:15,jitter:10,body:5};
-export const SCORE_LABELS:Record<string,string>={rig:'Rig match',punch:'Punch tracking',bones:'Bone stability',known:'Known poses',reliability:'Visibility',jitter:'Stillness',body:'Body angle'};
+export const NAMES:Record<number,string>={0:'nose',11:'leftShoulder',12:'rightShoulder',13:'leftElbow',14:'rightElbow',15:'leftWrist',16:'rightWrist',23:'leftHip',24:'rightHip',25:'leftKnee',26:'rightKnee',27:'leftAnkle',28:'rightAnkle'};
+/** Heels 29/30, foot index 31/32 and ankles 27/28: the points that can touch the floor. */
+export const FOOT=[27,28,29,30,31,32];
+export const LINKS:[number,number][]=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[27,31],[28,30],[30,32],[28,32],[0,7],[0,8]];
+export const DEFAULT_SETTINGS:Settings={model:'full',resolution:'1280x720',facing:'user',deviceId:'',orientation:'landscape'};
+/** World points are metres. Tuned so a 45 cm, 150 ms jab keeps >90% of its reach at 20 fps. */
+export const WORLD_FILTER:FilterSettings={minCutoff:1.5,beta:5,dCutoff:2};
+/** Image points are 0–1 of the frame. About 2.5 m per frame height at 3 m, so beta is scaled to match the world setting. */
+export const IMAGE_FILTER:FilterSettings={minCutoff:1.5,beta:12,dCutoff:2};

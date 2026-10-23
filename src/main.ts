@@ -1,74 +1,141 @@
 import './style.css';
-import {DEFAULT_SETTINGS,DEFAULT_WEIGHTS,KEYS,LINKS,type Settings,type Session,type Frame} from './types';
-import {home,setup,shell,runPage,results,details,metricsGrid,floor,esc,fmt,cameraHelp} from './ui';
-import {cameraContext} from './camera-access';
-import {Viewer} from './rig';
-import {Tracker,enableTilt,tilt,screenTilt,type TrackingSample} from './tracker';
+import type * as T from 'three';
+import {parseConfig} from './config';
+import {Tracker,enableTilt,tilt,type TrackingSample} from './tracker';
 import {PoseFilter} from './filter';
-import {bodyAngle,angularDiff,signedAngle,visible} from './math';
-import {script,nextPlan} from './protocol';
-import {calculate} from './metrics';
-import {demoPose,makeDemo} from './demo';
-import {listSessions,saveSession,removeSession,download,csv,validateImport,saveVideo,getVideo} from './storage';
-const $=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
-let sessions:Session[]=[],settings:Settings=structuredClone(DEFAULT_SETTINGS),weights={...DEFAULT_WEIGHTS},demo=false,page='home';
-let viewer:Viewer|null=null,tracker:Tracker|null=null,filter=new PoseFilter(),latest:TrackingSample|null=null,uiTimer=0,lastFrameTime=0,liveReady=false,currentSession:Session|null=null,baseTime=0,cueId='',runTimer=0,illustration=0,muted=false,recorder:MediaRecorder|null=null,videoChunks:Blob[]=[],wakeLock:WakeLockSentinel|null=null;
-let lastSampleReceived=0,pendingSave:Session|null=null,pendingVideo:Blob|null=null,readinessOverride=false;
-const app=$('app');
-try{const saved=JSON.parse(localStorage.getItem('motion-settings')??'null');if(saved)settings={...settings,...saved,filter:{...settings.filter,...saved.filter},recordVideo:false,envelopeChecked:false};const w=JSON.parse(localStorage.getItem('motion-weights')??'null');if(w)weights={...weights,...w}}catch{}
-function toast(message:string){const t=$('toast');t.textContent=message;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),6000)}
-function persist(){try{localStorage.setItem('motion-settings',JSON.stringify(settings));localStorage.setItem('motion-weights',JSON.stringify(weights))}catch{}}
-function cleanup(){clearInterval(runTimer);clearInterval(uiTimer);cancelAnimationFrame(illustration);tracker?.stop();tracker=null;viewer?.dispose();viewer=null;latest=null;liveReady=false;lastFrameTime=0;filter.reset();if('speechSynthesis'in window)speechSynthesis.cancel();}
-function render(){cleanup();page=location.hash.slice(1)||'home';if(!['home','setup','mirror','results'].includes(page))page='home';app.innerHTML=shell(page,sessions.filter(s=>!s.synthetic).length);const main=$('main');if(page==='home'){main.innerHTML=home(sessions,settings);try{viewer=new Viewer($('home-viewer'));const animate=()=>{const p=demoPose(performance.now()/1000,'jabSlow');viewer?.update(p,p,p,false);illustration=requestAnimationFrame(animate)};animate()}catch{$('home-viewer').innerHTML='<div class="viewer-fallback">3D preview needs WebGL 2.</div>'}bindCommon();$('load-demo').onclick=()=>loadDemo();}
-if(page==='setup'||page==='mirror'){main.innerHTML=setup(settings,sessions,page==='mirror');bindSetup();}
-if(page==='results'){main.innerHTML=results(sessions,weights,demo);bindResults();}
+import {Viewer} from './viewer';
+import {cameraUp,levelQuaternion} from './motion';
+import {demoFrame} from './demo';
+import {DEFAULT_SETTINGS,KEYS,LINKS,type Facing,type Point} from './types';
+import {quantile,visible} from './math';
+import {COUNTDOWN_S,HOLD_S,summarize,type HoldSample} from './capture';
+import {countPositions,download,listPositions,savePosition} from './storage';
+
+const store=(()=>{try{return localStorage}catch{return null}})();
+const cfg=parseConfig(location.search,store);
+const app=document.getElementById('app')!;
+app.innerHTML=`<section class="pane cam"><div class="view" id="cam-view"><video id="video" muted playsinline></video><canvas id="overlay"></canvas></div><p class="status" id="status" role="status"></p><button class="start" id="start" hidden>Start camera</button></section>
+<section class="pane world"><div class="view" id="world-view"></div></section>
+<footer class="bar"><label class="match"><span>Match&nbsp;%</span><input id="match" type="number" inputmode="numeric" min="0" max="100" step="1" placeholder="0–100"></label><button class="save" id="save">Save this position</button><a class="export" id="export" href="#">Export (0)</a></footer>`;
+const $=<E extends HTMLElement>(id:string)=>document.getElementById(id) as E;
+const video=$<HTMLVideoElement>('video'),overlay=$<HTMLCanvasElement>('overlay'),statusLine=$('status'),startButton=$<HTMLButtonElement>('start'),match=$<HTMLInputElement>('match'),saveButton=$<HTMLButtonElement>('save'),exportLink=$<HTMLAnchorElement>('export');
+
+let viewer:Viewer|null=null;
+try{viewer=new Viewer($('world-view'),cfg.debug)}catch(e){console.warn(e)}
+const filter=new PoseFilter();
+let tracker:Tracker|null=null,facing:Facing=cfg.facing,statusText=viewer?'Starting…':'The 3D view needs WebGL, which this browser does not provide.',statusError=!viewer;
+let smoothedUp:T.Vector3|null=null,lostSince=0,lastLandmarks:Point[]=[];
+const times:number[]=[],inference:number[]=[];
+
+function setStatus(text:string,error=false){statusText=text;statusError=error;renderStatus()}
+const live=()=>cfg.demo||!!tracker?.running;
+function renderStatus(){
+ let text=statusText,error=statusError;
+ if(live()&&!error){
+  const gaps=times.slice(1).map((t,i)=>t-times[i]),fps=gaps.length?1000/quantile(gaps,.5)!:0;
+  text=`${cfg.model} · ${cfg.demo?'demo':tracker?.delegate} · ${fps.toFixed(0)} fps`;
+  if(cfg.debug){const p=lastLandmarks,v=(i:number)=>p[i]?(p[i].visibility??0).toFixed(2):'–';text+=` · inference ${(quantile(inference,.5)??0).toFixed(0)} ms · wrist vis L ${v(15)} R ${v(16)}`}
+  if(lastLandmarks.length!==33)text+=' · no one in view';else if(viewer&&!viewer.motion.calibrated)text+=' · stand still to calibrate';
+ }
+ statusLine.textContent=text;statusLine.classList.toggle('error',error);
 }
-function bindCommon(){document.querySelectorAll<HTMLButtonElement>('[data-details]').forEach(b=>b.onclick=()=>{if(page!=='results'){location.hash='results';setTimeout(()=>showDetails(b.dataset.details!),0)}else showDetails(b.dataset.details!)});document.querySelectorAll<HTMLButtonElement>('[data-export]').forEach(b=>b.onclick=()=>{const s=sessions.find(s=>s.id===b.dataset.export);if(s)download(`motion-${s.id}.json`,JSON.stringify(s))});document.querySelectorAll<HTMLButtonElement>('[data-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this local session and its video?'))return;try{await removeSession(b.dataset.delete!);sessions=sessions.filter(s=>s.id!==b.dataset.delete);render()}catch(e){toast('Could not delete: '+String(e))}});document.querySelectorAll<HTMLButtonElement>('[data-video]').forEach(b=>b.onclick=async()=>{const blob=await getVideo(b.dataset.video!);if(blob)download(`motion-${b.dataset.video}.${blob.type.includes('mp4')?'mp4':'webm'}`,blob);else toast('Video is not available on this device.')})}
-function bindSetup(){try{viewer=new Viewer($('live-viewer'))}catch(e){$('live-viewer').innerHTML='<div class="viewer-fallback">This browser needs WebGL 2 to show the rig.</div>';toast(String(e))}
-$('camera-status').insertAdjacentHTML('afterend',cameraHelp(cameraContext(),location.origin+location.pathname+location.hash));
-const form=$<HTMLFormElement>('settings');form.onchange=(event)=>{if((event.target as HTMLInputElement).type==='range')return;readForm();settings.stage='Manual';persist();if($('floor-helper'))$('floor-helper').innerHTML=floor(settings);if(tracker){tracker.stop();tracker=null;$('enable-camera').removeAttribute('disabled');$('camera-placeholder').hidden=false;$('camera-status').textContent='Settings changed. Enable the camera to apply them.';liveReady=false;updateChecks()}};
-form.querySelectorAll<HTMLInputElement>('input[type="range"]').forEach(input=>input.oninput=()=>{readForm();filter.reset();$('cutoff-value').textContent=String(settings.filter.minCutoff);$('beta-value').textContent=String(settings.filter.beta);$('dcutoff-value').textContent=String(settings.filter.dCutoff);persist()});
-$('enable-camera').onclick=async()=>{
- readForm();settings.envelopeChecked=$<HTMLInputElement>('envelope-check')?.checked??false;persist();filter.reset();viewer?.rig.resetCalibration();tracker?.stop();
- const active=new Tracker($<HTMLVideoElement>('camera'),onSample,(message,error,help)=>{if(tracker!==active)return;if($('camera-status'))$('camera-status').textContent=message;if($('camera-placeholder'))$('camera-placeholder').hidden=!!active.stream;if(help&&$('camera-help'))$<HTMLDetailsElement>('camera-help').open=true;if(error)toast(message)});
- tracker=active;const button=$('enable-camera');button.setAttribute('disabled','');
- try{await active.start(settings);if(tracker===active&&active.running){$('camera-placeholder').hidden=true;await lenses()}}
- finally{if(tracker===active)button.removeAttribute('disabled')}
+setInterval(renderStatus,500);renderStatus();
+
+function applyMirror(){const mirrored=facing==='user';for(const id of ['cam-view','world-view'])$(id).classList.toggle('mirror',mirrored);if(viewer)viewer.mirrored=mirrored}
+const aspect=()=>cfg.demo?16/9:(video.videoWidth||16)/(video.videoHeight||9);
+function currentUp(){const up=cameraUp(tilt,facing);if(!up)return smoothedUp;smoothedUp=smoothedUp?smoothedUp.lerp(up,.2).normalize():up;return smoothedUp}
+
+function onSample(s:TrackingSample){
+ const t=s.timestamp;times.push(t);inference.push(s.inferenceMs);if(times.length>30){times.shift();inference.shift()}
+ const pose=s.world.length===33&&s.landmarks.length===33,up=currentUp();
+ const held:HoldSample|null=save?.phase==='hold'?{t,image:s.landmarks,world:s.world,inferenceMs:s.inferenceMs,scale:null,up:up?.clone()??null}:null;
+ if(held)save!.samples.push(held);
+ lastLandmarks=s.landmarks;draw2d(pose?s.landmarks:[]);
+ if(!pose){
+  // Out of view for 2 s (for example, walking to the phone): measure the start position again when you are back.
+  if(!lostSince)lostSince=t;else if(t-lostSince>2000&&viewer?.motion.calibrated)viewer.motion.reset();
+  viewer?.update([],[],[],t,aspect(),levelQuaternion(up));return;
+ }
+ lostSince=0;
+ const world=filter.apply(s.world,t,cfg.world,'world'),image=filter.apply(s.landmarks,t,cfg.image,'image');
+ const rig=viewer?.update(s.world,world,image,t,aspect(),levelQuaternion(up));
+ if(held)held.scale=rig?.projection?.scale??null;
+}
+
+function draw2d(p:Point[]){
+ const w=cfg.demo?1280:video.videoWidth,h=cfg.demo?720:video.videoHeight;if(!w||!h)return;
+ if(overlay.width!==w||overlay.height!==h){overlay.width=w;overlay.height=h}
+ const ctx=overlay.getContext('2d')!;ctx.clearRect(0,0,w,h);if(cfg.demo){ctx.fillStyle='#1a2320';ctx.fillRect(0,0,w,h)}
+ ctx.strokeStyle='#b9f47c';ctx.fillStyle='#b9f47c';ctx.lineWidth=Math.max(2,h/160);ctx.lineCap='round';
+ for(const [a,b] of LINKS){if(!visible(p,[a,b]))continue;ctx.beginPath();ctx.moveTo(p[a].x*w,p[a].y*h);ctx.lineTo(p[b].x*w,p[b].y*h);ctx.stroke()}
+ for(const i of KEYS){if(!visible(p,[i]))continue;ctx.beginPath();ctx.arc(p[i].x*w,p[i].y*h,h/110,0,Math.PI*2);ctx.fill()}
+}
+
+let lock:WakeLockSentinel|null=null;
+async function keepAwake(){try{if(document.visibilityState==='visible'&&'wakeLock' in navigator&&!lock)lock=await navigator.wakeLock.request('screen');lock?.addEventListener('release',()=>{lock=null})}catch{}}
+document.addEventListener('visibilitychange',()=>void keepAwake());
+
+async function startCamera(){
+ startButton.hidden=true;
+ tracker??=new Tracker(video,onSample,(message,error)=>setStatus(message,!!error));
+ await tracker.start({...DEFAULT_SETTINGS,model:cfg.model,resolution:cfg.resolution,facing:cfg.facing,orientation:innerWidth>=innerHeight?'landscape':'portrait'});
+ if(!tracker.running){startButton.hidden=false;return}
+ const actual=tracker.cameraSettings?.facingMode;facing=actual==='user'||actual==='environment'?actual:cfg.facing;applyMirror();void keepAwake();
+}
+startButton.onclick=()=>void startCamera();
+
+// Tilt: Android delivers it without asking; iOS needs a tap, so it is requested on the first Save press.
+type Orientation=typeof DeviceOrientationEvent&{requestPermission?:()=>Promise<string>};
+const tiltNeedsPermission=typeof (globalThis.DeviceOrientationEvent as Orientation|undefined)?.requestPermission==='function';
+let tiltAsked=false;if(!tiltNeedsPermission){tiltAsked=true;void enableTilt().catch(()=>false)}
+
+let audio:AudioContext|null=null;
+function unlockAudio(){try{audio??=new AudioContext();void audio.resume()}catch{audio=null}}
+function beep(delay=0,frequency=880){if(!audio)return;const t=audio.currentTime+delay,o=audio.createOscillator(),g=audio.createGain();o.frequency.value=frequency;o.connect(g);g.connect(audio.destination);g.gain.setValueAtTime(.2,t);g.gain.exponentialRampToValueAtTime(.001,t+.09);o.start(t);o.stop(t+.1)}
+
+const SAVE_LABEL='Save this position';
+let save:{phase:'countdown'|'hold';start:number;beeps:number;timer:number;matchPct:number;samples:HoldSample[]}|null=null,flashTimer=0;
+function flash(text:string,ms:number){clearTimeout(flashTimer);saveButton.textContent=text;flashTimer=window.setTimeout(()=>{if(!save)saveButton.textContent=SAVE_LABEL},ms)}
+function stopSave(){if(save)clearInterval(save.timer);save=null;saveButton.classList.remove('busy')}
+saveButton.onclick=()=>{
+ if(save){stopSave();flash('Cancelled',1500);return}
+ const pct=match.value.trim()===''?NaN:Number(match.value);
+ if(!(Number.isFinite(pct)&&pct>=0&&pct<=100)){match.classList.add('needed');match.focus();flash('Enter Match % first',2000);return}
+ if(!live()){flash('Camera is not running',2000);return}
+ match.classList.remove('needed');match.blur();unlockAudio();
+ if(!tiltAsked){tiltAsked=true;void enableTilt().catch(()=>false)}// must run inside the tap
+ // You may have moved the phone: measure the floor and start position again once you stand still.
+ viewer?.motion.reset();
+ clearTimeout(flashTimer);saveButton.classList.add('busy');
+ save={phase:'countdown',start:performance.now(),beeps:0,timer:window.setInterval(tick,50),matchPct:pct,samples:[]};tick();
 };
-$('stop-camera').onclick=()=>{tracker?.stop();tracker=null;latest=null;liveReady=false;$('enable-camera').removeAttribute('disabled');$('camera-placeholder').hidden=false;$('camera-status').textContent='Camera stopped.';updateChecks()};
-$('enable-tilt').onclick=async()=>{try{const enabled=await enableTilt();toast(enabled?'Tilt enabled. If no value appears, the sensor is unavailable.':'Tilt sensor is unavailable. The session can still run.')}catch(e){toast('Tilt could not be enabled: '+String(e))}};
-$('test-voice').onclick=async()=>{await audioReady();say('Voice is ready. Three, two, one.');beep()};
-$('toggle-overlay').onclick=()=>{if(viewer){viewer.overlay=!viewer.overlay;viewer.layout();$('toggle-overlay').textContent=viewer.overlay?'Side by side':'Overlay views'}};
-$('recalibrate').onclick=()=>{viewer?.rig.resetCalibration();filter.reset();toast('Stand still with your whole body visible for 30 frames.')};
-if($('use-next'))$('use-next').onclick=()=>{readForm();const plan=nextPlan(sessions,settings);if(plan){settings=plan.settings;persist();render()}else toast('No next test is available. Check complete scored sessions, or run a manual test.')};
-if($('envelope-check'))$('envelope-check').onchange=()=>{settings.envelopeChecked=$<HTMLInputElement>('envelope-check').checked;updateChecks()};
-if($('start-run'))$('start-run').onclick=()=>beginRun(false);if($('record-anyway'))$('record-anyway').onclick=()=>beginRun(true);
-uiTimer=window.setInterval(updateChecks,300);
+function tick(){
+ if(!save)return;const now=performance.now(),elapsed=(now-save.start)/1000;
+ if(save.phase==='countdown'){
+  while(save.beeps<COUNTDOWN_S&&save.beeps<=elapsed){beep();save.beeps++}
+  if(elapsed>=COUNTDOWN_S){save.phase='hold';save.start=now;save.samples=[]}
+  else{saveButton.textContent=`Walk back · ${COUNTDOWN_S-Math.floor(elapsed)}`;return}
+ }
+ const held=(now-save.start)/1000;saveButton.textContent=`Hold your stance · ${Math.max(1,Math.ceil(HOLD_S-held))}`;
+ if(held>=HOLD_S)void finishSave();
 }
-function readForm(){const f=$<HTMLFormElement>('settings');if(!f)return;const d=new FormData(f);for(const k of ['angle','height','distance'] as const)if(d.has(k))settings[k]=Number(d.get(k));for(const k of ['orientation','stance','model','resolution','facing','deviceId'] as const)if(d.has(k))(settings as unknown as Record<string,unknown>)[k]=d.get(k);settings.recordVideo=d.get('recordVideo')==='on';settings.filter={minCutoff:Number(d.get('minCutoff')),beta:Number(d.get('beta')),dCutoff:Number(d.get('dCutoff'))};settings.cameraLabel=$<HTMLSelectElement>('lens-list').selectedOptions[0]?.textContent??settings.facing;}
-async function lenses(){try{const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');const selected=tracker?.cameraSettings?.deviceId??settings.deviceId;const select=$<HTMLSelectElement>('lens-list');select.innerHTML='<option value="">Automatic · prefer wide</option>'+devices.map(d=>`<option value="${esc(d.deviceId)}" ${d.deviceId===selected?'selected':''}>${esc(d.label||'Camera')}</option>`).join('');settings.deviceId=selected;settings.cameraLabel=devices.find(d=>d.deviceId===selected)?.label??settings.facing;persist()}catch{}}
-function updateChecks(){if(!$('checks'))return;const p=latest?.landmarks??[];const has=tracker?.running&&p.length===33&&performance.now()-lastSampleReceived<1200;const joints=has&&visible(p,KEYS),margin=has&&[...KEYS,31,32].every(i=>p[i]?.x>.06&&p[i]?.x<.94&&p[i]?.y>.06&&p[i]?.y<.94);const a=has?bodyAngle(latest!.world):null,angleOk=a!==null&&angularDiff(a,signedAngle(settings))<20;const orientation=innerWidth>innerHeight?'landscape':'portrait',orientationOk=orientation===settings.orientation;const t=screenTilt(tilt);liveReady=!!has&&!!joints&&!!margin&&angleOk&&orientationOk&&settings.envelopeChecked;const entries:[[boolean,string],[boolean,string],[boolean,string],[boolean,string]]=[[!!margin,'Full body fits, with a 6% margin'],[!!joints,'All key joints visible'],[angleOk,`Neutral body angle ${a===null?'—':fmt(a,0)+'°'} · target ${signedAngle(settings)}°`],[orientationOk,`${settings.orientation} phone orientation`]];$('checks').innerHTML=entries.map(([ok,text])=>`<li class="${ok?'pass':''}"><span>${ok?'✓':'○'}</span>${text}</li>`).join('')+`<li><span>↗</span>Phone tilt: ${t===null?'unavailable (optional)':fmt(t,0)+'° from upright'}</li>`;$('ready-badge').textContent=liveReady?'Ready':has?'Check position':'Camera off';$('ready-badge').className='tag '+(liveReady?'ready':'');$<HTMLButtonElement>('start-run').disabled=!liveReady;$<HTMLButtonElement>('record-anyway').disabled=!has||!viewer;}
-function onSample(s:TrackingSample){if(!viewer)return;latest=s;lastSampleReceived=performance.now();const sw=filter.apply(s.world,s.timestamp,settings.filter,'world'),si=filter.apply(s.landmarks,s.timestamp,settings.filter,'image');const rig=viewer.update(s.world,sw,s.landmarks,!currentSession,($<HTMLVideoElement>('camera').videoWidth||1280)/($<HTMLVideoElement>('camera').videoHeight||720));const now=performance.now(),fps=lastFrameTime?1000/(s.timestamp-lastFrameTime):0;lastFrameTime=s.timestamp;if($('fps'))$('fps').textContent=fmt(fps,0)+' FPS';draw2d(s.landmarks);if(currentSession&&s.timestamp>=baseTime){const capture=s.captureTime;const frame:Frame={t:s.timestamp-baseTime,captureTime:capture,mediaTime:s.mediaTime,cue:cueId,raw2d:s.landmarks,rawWorld:s.world,smooth2d:si,smoothWorld:sw,rig,inferenceMs:s.inferenceMs,fps,pipelineMs:now-s.pipelineStart,captureToSubmitMs:capture===null?null:Math.max(0,now-capture),tilt:tilt?{...tilt}:null,presentedFrames:s.presentedFrames};currentSession.frames.push(frame);if(currentSession.frames.length>=30000){currentSession.notes.push('Stopped at the 30,000 frame limit.');void finishRun(false)}}}
-function draw2d(p:TrackingSample['landmarks']){const canvas=$<HTMLCanvasElement>('overlay'),video=$<HTMLVideoElement>('camera');if(!canvas||!video||!video.videoWidth)return;canvas.width=video.videoWidth;canvas.height=video.videoHeight;const ctx=canvas.getContext('2d')!;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.strokeStyle='#b9f47c';ctx.fillStyle='#b9f47c';ctx.lineWidth=3;for(const[a,b]of LINKS){if(!visible(p,[a,b]))continue;ctx.beginPath();ctx.moveTo(p[a].x*canvas.width,p[a].y*canvas.height);ctx.lineTo(p[b].x*canvas.width,p[b].y*canvas.height);ctx.stroke()}for(const i of KEYS){if(!visible(p,[i]))continue;ctx.beginPath();ctx.arc(p[i].x*canvas.width,p[i].y*canvas.height,4,0,Math.PI*2);ctx.fill()}}
-let audioContext:AudioContext|null=null;
-async function audioReady(){try{audioContext??=new AudioContext();await audioContext.resume()}catch{toast('Audio is unavailable. Follow the on-screen cues.')}}
-function beep(high=false){if(!audioContext)return;const o=audioContext.createOscillator(),g=audioContext.createGain();o.connect(g);g.connect(audioContext.destination);o.frequency.value=high?1100:650;g.gain.setValueAtTime(.08,audioContext.currentTime);g.gain.exponentialRampToValueAtTime(.001,audioContext.currentTime+.12);o.start();o.stop(audioContext.currentTime+.12)}
-function say(text:string){if(muted||!('speechSynthesis'in window))return;const voices=speechSynthesis.getVoices().filter(v=>v.localService&&v.lang.startsWith('en'));if(!voices.length){if(currentSession&&!currentSession.notes.includes('No local English voice; beeps and text only.'))currentSession.notes.push('No local English voice; beeps and text only.');if(!currentSession)toast('No local English voice is installed. Install one in phone speech settings. Beeps and text still work.');return}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.voice=voices[0];u.lang=voices[0].lang;u.rate=1.1;speechSynthesis.speak(u)}
-async function beginRun(override:boolean){if(!tracker?.running||!viewer)return;readForm();await audioReady();readinessOverride=override;const oldVideo=$('camera'),oldHost=$('live-viewer'),oldCanvas=$('overlay');clearInterval(uiTimer);app.innerHTML=shell('run',sessions.length);$('main').innerHTML=runPage();$('camera').replaceWith(oldVideo);$('overlay').replaceWith(oldCanvas);$('live-viewer').replaceWith(oldHost);oldHost.className='run-viewer';viewer.fit();page='run';muted=false;filter.reset();const hadCalibration=viewer.rig.calibrated;viewer.rig.calibrated=true;
-baseTime=performance.now();cueId='countdown';currentSession={schemaVersion:1,id:crypto.randomUUID(),createdAt:new Date().toISOString(),settings:structuredClone(settings),device:{userAgent:navigator.userAgent,platform:navigator.platform,camera:tracker.cameraSettings,delegate:tracker.delegate,runtime:'MediaPipe 1.1.1; Three 0.186.1'},frames:[],cues:[],duration:0,complete:false,synthetic:false,notes:readinessOverride?['Started with readiness checks overridden.']:[],rigCalibration:{...viewer.rig.dimensions},videoAvailable:false};
-if(!hadCalibration)currentSession.notes.push('Rig may use default proportions; check calibration.');
-try{if(navigator.wakeLock)wakeLock=await navigator.wakeLock.request('screen')}catch{currentSession.notes.push('Screen wake lock unavailable. Keep the screen awake.')}
-videoChunks=[];if(settings.recordVideo){try{if(!globalThis.MediaRecorder)throw new Error('MediaRecorder unavailable');const type=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/mp4'].find(t=>MediaRecorder.isTypeSupported(t));recorder=new MediaRecorder(tracker.stream!,type?{mimeType:type}:undefined);recorder.ondataavailable=e=>{if(e.data.size)videoChunks.push(e.data)};recorder.onerror=()=>currentSession?.notes.push('Video recording failed. Landmark data is still saved.');recorder.start(1000)}catch(e){currentSession.notes.push('Video unavailable: '+String(e));toast('Video could not start. Landmark recording continues.')}}
-$('stop-run').onclick=()=>void finishRun(false);$('mute-voice').onclick=()=>{muted=!muted;if(muted)speechSynthesis.cancel();$('mute-voice').textContent=muted?'Unmute voice':'Mute voice'};
-const cues=script(settings.stance),segments=cues.flatMap(c=>[{id:c.id,prepare:true,duration:3000,cue:c},{id:c.id,prepare:false,duration:c.seconds*1000,cue:c}]);const total=5000+segments.reduce((n,s)=>n+s.duration,0);let lastSegment=-2,lastSecond=-1,lastTick=performance.now();say('Get ready. Five seconds.');
-const tick=()=>{if(!currentSession)return;const now=performance.now();if(now-lastTick>2500){currentSession.notes.push('Stopped because the page paused.');void finishRun(false);return}lastTick=now;if(now-lastSampleReceived>5000){currentSession.notes.push('Stopped because camera frames stopped.');void finishRun(false);return}const elapsed=now-baseTime;let offset=5000,index=-1;for(let i=0;i<segments.length;i++){if(elapsed<offset+segments[i].duration){index=i;break}offset+=segments[i].duration}if(elapsed>=total){void finishRun(true);return}if(elapsed<5000){index=-1;offset=0}const segment=index>=0?segments[index]:null;
-if(index!==lastSegment){if(lastSegment>=0&&!segments[lastSegment].prepare){const last=currentSession.cues[currentSession.cues.length-1];if(last)last.end=elapsed}if(segment){cueId=segment.prepare?'transition':segment.id;$('cue-text').textContent=segment.cue.text;$('cue-position').textContent=`${Math.floor(index/2)+1} / ${cues.length} · ${segment.prepare?'NEXT MOVEMENT':'GO'}`;if(segment.prepare)say(segment.cue.text);else{beep(true);currentSession.cues.push({id:segment.id,start:elapsed,end:elapsed+segment.duration})}}lastSegment=index;lastSecond=-1}
-const remaining=Math.ceil(((segment?.duration??5000)-(elapsed-offset))/1000);$('countdown').textContent=String(remaining);if(remaining!==lastSecond){if(!segment||segment.prepare){beep();if(!segment&&remaining<=3)say(String(remaining))}else if(segment.cue.count)beep();lastSecond=remaining}$<HTMLProgressElement>('run-progress').value=100*elapsed/total;$('run-status').textContent=`${currentSession.frames.length} frames · ${Math.ceil((total-elapsed)/1000)} sec left · ${tracker?.delegate??''}`;};runTimer=window.setInterval(tick,80);tick();}
-let finishing=false;
-async function finishRun(complete:boolean){if(finishing||!currentSession)return;finishing=true;clearInterval(runTimer);speechSynthesis.cancel();beep(true);const s=currentSession;currentSession=null;s.duration=performance.now()-baseTime;s.complete=complete;const last=s.cues[s.cues.length-1];if(last)last.end=Math.min(last.end,s.duration);if(!tilt)s.notes.push('Device orientation sensor unavailable.');if(!s.frames.some(f=>f.captureTime!==null))s.notes.push('True capture timestamp unavailable; latency is pickup-to-render-submission only.');$('cue-text').textContent='Saving your session…';let blob:Blob|null=null;if(recorder&&recorder.state!=='inactive'){const r=recorder;await new Promise<void>(resolve=>{r.onstop=()=>resolve();r.stop()});blob=new Blob(videoChunks,{type:r.mimeType});}recorder=null;try{await wakeLock?.release()}catch{}wakeLock=null;
-try{s.metrics=calculate(s);if(blob?.size){try{await saveVideo(s.id,blob);s.videoAvailable=true}catch{s.notes.push('Video could not be saved.')}}await saveSession(s);sessions.push(s);demo=false;cleanup();location.hash='results';if(page==='results')render();setTimeout(()=>showDetails(s.id),50)}catch(e){pendingSave=s;pendingVideo=blob;cleanup();app.innerHTML=shell('results',sessions.length);$('main').innerHTML=`<section class="panel"><h1>Storage is full or unavailable.</h1><p>Your recording is still in memory. Export it before closing this page.</p><button class="button primary" id="rescue-json">Download session JSON</button>${blob?'<button class="button secondary" id="rescue-video">Download video</button>':''}</section>`;$('rescue-json').onclick=()=>download(`motion-${pendingSave!.id}.json`,JSON.stringify(pendingSave));if(blob)$('rescue-video').onclick=()=>download('motion-video.webm',pendingVideo!);toast(String(e))}finally{finishing=false}}
-async function loadDemo(){toast('Preparing synthetic sessions…');await new Promise(r=>setTimeout(r,40));if(!sessions.some(s=>s.synthetic)){const ds=makeDemo();sessions.push(...ds);for(const s of ds){try{await saveSession(s)}catch{}}}demo=true;if(location.hash==='#results')render();else location.hash='results'}
-function bindResults(){bindCommon();$('toggle-demo').onclick=()=>{if(demo){demo=false;render()}else void loadDemo()};$('export-all').onclick=()=>download(`motion-${demo?'demo':'sessions'}.json`,JSON.stringify(sessions.filter(s=>s.synthetic===demo)));$('export-csv').onclick=()=>download('motion-metrics.csv',csv(sessions.filter(s=>s.synthetic===demo)),'text/csv');$('reset-weights').onclick=()=>{weights={...DEFAULT_WEIGHTS};persist();render()};document.querySelectorAll<HTMLInputElement>('[data-weight]').forEach(i=>i.onchange=()=>{weights[i.dataset.weight!]=Math.min(100,Math.max(0,Number(i.value)||0));persist();render()});$('import-json').onclick=()=>$<HTMLInputElement>('json-file').click();$<HTMLInputElement>('json-file').onchange=async e=>{const file=(e.target as HTMLInputElement).files?.[0];if(!file)return;if(file.size>200*1024*1024){toast('Import files smaller than 200 MB.');return}try{const imported=validateImport(JSON.parse(await file.text()));for(const s of imported){if(sessions.some(x=>x.id===s.id))s.id=crypto.randomUUID();s.metrics=calculate(s);await saveSession(s);sessions.push(s)}demo=imported.every(s=>s.synthetic);render();toast(`Imported ${imported.length} session(s).`)}catch(e){toast('Import failed: '+String(e))}}}
-function showDetails(id:string){const s=sessions.find(s=>s.id===id);if(!s||!$('session-details'))return;cancelAnimationFrame(illustration);viewer?.dispose();viewer=null;$('session-details').innerHTML=details(s);$('session-details').scrollIntoView({behavior:'smooth',block:'start'});bindCommon();$('close-details').onclick=()=>{cancelAnimationFrame(illustration);viewer?.dispose();viewer=null;$('session-details').innerHTML=''};$<HTMLSelectElement>('metric-part').onchange=()=>{const part=$<HTMLSelectElement>('metric-part').value;$('metric-grid').innerHTML=metricsGrid(part==='session'?s.metrics!.values:s.metrics!.perCue[part]??{})};$('replay-session').onclick=()=>{cancelAnimationFrame(illustration);viewer?.dispose();$('replay-area').innerHTML='<div class="live-3d"><div class="camera-heading"><span id="replay-label">Recorded landmarks</span></div><div id="replay-viewer" class="live-viewer"></div></div><input aria-label="Replay frame" id="replay-scrub" type="range" min="0" value="0" max="'+Math.max(0,s.frames.length-1)+'"><button class="small-button" id="replay-play">Play / pause</button>';try{viewer=new Viewer($('replay-viewer'));if(s.rigCalibration)viewer.rig.setCalibration(s.rigCalibration);let i=0,playing=true,last=performance.now();const scrub=$<HTMLInputElement>('replay-scrub');const draw=()=>{const f=s.frames[i];if(f){viewer!.update(f.rawWorld,f.smoothWorld,f.raw2d,false,(s.device.camera?.width??1280)/(s.device.camera?.height??720));$('replay-label').textContent=`${f.cue} · ${fmt(f.t/1000)} s`}};scrub.oninput=()=>{playing=false;i=Number(scrub.value);draw()};$('replay-play').onclick=()=>playing=!playing;const animate=(now:number)=>{if(playing&&now-last>=Math.max(10,(s.frames[i+1]?.t??((s.frames[i]?.t??0)+100))-(s.frames[i]?.t??0))){i=(i+1)%Math.max(1,s.frames.length);last=now;scrub.value=String(i);draw()}illustration=requestAnimationFrame(animate)};draw();illustration=requestAnimationFrame(animate)}catch(e){toast(String(e))}}}
-window.addEventListener('hashchange',()=>{if(currentSession){void finishRun(false);return}render()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&currentSession){currentSession.notes.push('Page hidden; stopped to protect timing.');void finishRun(false)}});window.addEventListener('beforeunload',e=>{if(currentSession||pendingSave){e.preventDefault()}});
-try{sessions=await listSessions();for(const s of sessions)if(!s.metrics)s.metrics=calculate(s)}catch{setTimeout(()=>toast('Local storage is unavailable. Completed sessions can still be exported.'),100)}render();
+async function finishSave(){
+ const s=save!;stopSave();beep(0,1320);beep(.18,1320);
+ if(!s.samples.length){flash('Nothing recorded: no camera frames',3000);return}
+ const track=tracker?.stream?.getVideoTracks()[0];
+ const record=summarize(s.samples,{matchPct:s.matchPct,synthetic:cfg.demo,model:cfg.model,delegate:cfg.demo?'demo':tracker?.delegate??'',aspect:aspect(),distance:viewer?.motion.d0??3,
+  camera:cfg.demo?{facing,label:'Synthetic demo',width:1280,height:720,frameRate:20}:{facing,label:track?.label??'',width:video.videoWidth,height:video.videoHeight,frameRate:tracker?.cameraSettings?.frameRate??null},
+  smoothing:{world:cfg.world,image:cfg.image},screen:{width:innerWidth,height:innerHeight,orientation:innerWidth>=innerHeight?'landscape':'portrait'},userAgent:navigator.userAgent,savedAt:new Date()});
+ try{const n=await savePosition(record);flash(`Saved #${n} · body angle ${record.bodyAngleDeg===null?'–':Math.round(record.bodyAngleDeg)+'°'}`,3000);void updateCount()}
+ catch(e){flash('Could not save',3000);setStatus('Saving failed: '+String(e),true)}
+}
+
+async function updateCount(){try{exportLink.textContent=`Export (${await countPositions()})`}catch{exportLink.textContent='Export (–)'}}
+exportLink.onclick=async e=>{e.preventDefault();try{const records=await listPositions(),stamp=new Date().toISOString().slice(0,16).replace(/[-:T]/g,'');download(`boxxing-positions-${stamp}.json`,JSON.stringify({app:'boxxing-position-finder',version:1,exportedAt:new Date().toISOString(),records}))}catch(error){setStatus('Export failed: '+String(error),true)}};
+void updateCount();
+
+if(cfg.demo){
+ // Synthetic poses at 20 fps, no camera.
+ applyMirror();setStatus('Demo');const t0=performance.now();
+ setInterval(()=>{const now=performance.now(),f=demoFrame((now-t0)/1000);onSample({timestamp:now,landmarks:f.image,world:f.world,inferenceMs:0,mediaTime:0,presentedFrames:null,captureTime:null,pipelineStart:now})},50);
+}else{applyMirror();void startCamera()}

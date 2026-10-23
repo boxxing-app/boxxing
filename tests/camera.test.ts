@@ -35,7 +35,7 @@ describe('camera permissions',()=>{
  it('shows help while permission is pending without imposing a timeout',async()=>{
   let allow!:(stream:MediaStream)=>void;const get=vi.fn(()=>new Promise<MediaStream>(resolve=>{allow=resolve})),status=vi.fn();device(get);
   const pending=requestCamera(DEFAULT_SETTINGS,new AbortController().signal,status,context);
-  await vi.advanceTimersByTimeAsync(240000);expect(get).toHaveBeenCalledTimes(1);expect(status).toHaveBeenCalledWith(expect.stringContaining('Camera help'),true);
+  await vi.advanceTimersByTimeAsync(240000);expect(get).toHaveBeenCalledTimes(1);expect(status).toHaveBeenCalledWith(expect.stringContaining('site settings'),true);
   const stream=fakeStream();allow(stream);expect(await pending).toBe(stream);
  });
  it('cancels promptly and closes a stream granted after cancellation',async()=>{

@@ -20,6 +20,7 @@ export class Tracker{
     const wide=devices.find(d=>d.kind==='videoinput'&&/wide|0[.,]5/i.test(d.label)&&!(/front|user|face/i.test(d.label)));
     if(wide&&wide.deviceId!==stream.getVideoTracks()[0].getSettings().deviceId){stream.getTracks().forEach(t=>t.stop());stream=await requestCamera({...s,deviceId:wide.deviceId},request.signal,status,context);if(stale())return;this.stream=stream}
    }
+   await widest(stream);if(stale())return;
    this.video.muted=true;this.video.playsInline=true;this.video.srcObject=stream;this.onStatus('Camera allowed. Starting preview…');await this.video.play();if(stale())return;cameraConnected=true;
    this.cameraSettings=stream.getVideoTracks()[0].getSettings();this.onStatus('Camera connected · loading '+s.model+' model…');await this.load(s.model);
    if(generation!==this.generation)return;this.running=true;this.onStatus('Camera live · '+this.delegate);this.loop();
@@ -73,5 +74,7 @@ export class Tracker{
  }
  stop(){this.generation++;this.running=false;this.ready=false;this.cameraRequest?.abort();this.cameraRequest=null;this.cancelLoading?.();this.cancelLoading=null;this.worker?.terminate();this.worker=null;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;if('cancelVideoFrameCallback'in this.video)this.video.cancelVideoFrameCallback(this.request);cancelAnimationFrame(this.request);this.busy=false;this.pending=null;this.lastTime=-1;this.video.srcObject=null;}
 }
+/** Zoom all the way out where the browser exposes camera zoom (it may not; then this does nothing). */
+async function widest(stream:MediaStream){try{const track=stream.getVideoTracks()[0],zoom=(track.getCapabilities?.() as {zoom?:{min:number}}|undefined)?.zoom,current=(track.getSettings() as {zoom?:number}).zoom;if(zoom&&current!==undefined&&zoom.min<current)await track.applyConstraints({advanced:[{zoom:zoom.min} as MediaTrackConstraintSet]})}catch{}}
 export let tilt:Tilt|null=null;
 export async function enableTilt(){type OrientationConstructor=typeof DeviceOrientationEvent&{requestPermission?:()=>Promise<string>};const C=globalThis.DeviceOrientationEvent as OrientationConstructor|undefined;if(!C)return false;if(C.requestPermission&&await C.requestPermission()!=='granted')return false;window.addEventListener('deviceorientation',e=>{tilt={alpha:e.alpha,beta:e.beta,gamma:e.gamma,screenAngle:screen.orientation?.angle??0,at:performance.now()}});return true}

@@ -7,10 +7,11 @@ import {IMAGE_FILTER,WORLD_FILTER,type Point} from '../src/types';
 
 const memory=(init:Record<string,string>={})=>{const m=new Map(Object.entries(init));return{getItem:(k:string)=>m.get(k)??null,setItem:(k:string,v:string)=>void m.set(k,v),removeItem:(k:string)=>void m.delete(k),m}};
 describe('URL settings',()=>{
- it('defaults to the front camera, full model and 1280x720',()=>{expect(parseConfig('')).toEqual({facing:'user',model:'full',resolution:'1280x720',world:WORLD_FILTER,image:IMAGE_FILTER,debug:false,demo:false})});
+ it('defaults to the front camera, full model and the whole 4:3 sensor',()=>{expect(parseConfig('')).toEqual({facing:'user',model:'full',resolution:'1280x960',world:WORLD_FILTER,image:IMAGE_FILTER,debug:false,demo:false})});
  it('reads camera, model, resolution, debug and demo, and ignores bad values',()=>{
   expect(parseConfig('?camera=rear&model=heavy&res=1920x1080&debug=1&demo=1')).toMatchObject({facing:'environment',model:'heavy',resolution:'1920x1080',debug:true,demo:true});
-  expect(parseConfig('?camera=side&model=huge&res=99x99&minCutoff=-1&beta=x')).toMatchObject({facing:'user',model:'full',resolution:'1280x720',world:WORLD_FILTER});
+  expect(parseConfig('?camera=side&model=huge&res=99x99&minCutoff=-1&beta=x')).toMatchObject({facing:'user',model:'full',resolution:'1280x960',world:WORLD_FILTER});
+  expect(parseConfig('?res=1280x720').resolution).toBe('1280x720');
  });
  it('remembers smoothing from the URL under a new key and drops the old pixel-tuned settings',()=>{
   const store=memory({'motion-settings':JSON.stringify({filter:{minCutoff:1,beta:.04,dCutoff:1}})});

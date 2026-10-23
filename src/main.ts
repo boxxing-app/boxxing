@@ -34,7 +34,7 @@ function renderStatus(){
  if(live()&&!error){
   const gaps=times.slice(1).map((t,i)=>t-times[i]),fps=gaps.length?1000/quantile(gaps,.5)!:0;
   text=`${cfg.model} · ${cfg.demo?'demo':tracker?.delegate} · ${fps.toFixed(0)} fps`;
-  if(cfg.debug){const p=lastLandmarks,v=(i:number)=>p[i]?(p[i].visibility??0).toFixed(2):'–';text+=` · inference ${(quantile(inference,.5)??0).toFixed(0)} ms · wrist vis L ${v(15)} R ${v(16)}`}
+  if(cfg.debug){const p=lastLandmarks,v=(i:number)=>p[i]?(p[i].visibility??0).toFixed(2):'–';text+=` · ${cfg.demo?'1280×720':`${video.videoWidth}×${video.videoHeight}`} · inference ${(quantile(inference,.5)??0).toFixed(0)} ms · wrist vis L ${v(15)} R ${v(16)}`}
   if(lastLandmarks.length!==33)text+=' · no one in view';else if(viewer&&!viewer.motion.calibrated)text+=' · stand still to calibrate';
  }
  statusLine.textContent=text;statusLine.classList.toggle('error',error);

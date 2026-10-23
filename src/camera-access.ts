@@ -39,7 +39,9 @@ function requestOnce(constraints:MediaStreamConstraints,signal:AbortSignal):Prom
 export async function requestCamera(settings:Settings,signal:AbortSignal,onStatus:(message:string,help?:boolean)=>void,context=cameraContext()){
  cameraPreflight(context);
  const [width,height]=settings.resolution.split('x').map(Number),portrait=settings.orientation==='portrait';
- const video:MediaTrackConstraints={width:{ideal:portrait?height:width},height:{ideal:portrait?width:height},frameRate:{ideal:30},...(settings.deviceId?{deviceId:{exact:settings.deviceId}}:{facingMode:{ideal:settings.facing}})};
+ // resizeMode 'none': use a real camera format instead of letting the browser crop and scale to the requested size.
+ // With a 4:3 request that is the whole sensor; a 16:9 request crops it (to under half its area in portrait).
+ const video:MediaTrackConstraints&{resizeMode?:ConstrainDOMString}={width:{ideal:portrait?height:width},height:{ideal:portrait?width:height},frameRate:{ideal:30},resizeMode:{ideal:'none'},...(settings.deviceId?{deviceId:{exact:settings.deviceId}}:{facingMode:{ideal:settings.facing}})};
  const hint=setTimeout(()=>{if(!signal.aborted)onStatus('Waiting for camera permission. If no prompt appears, check the camera permission in the browser site settings. You can cancel and retry.',true)},8000);
  try{
   let stream:MediaStream;

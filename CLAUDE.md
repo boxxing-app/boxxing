@@ -16,6 +16,7 @@ Mobile web app (Vite + TypeScript, MediaPipe Tasks Vision `PoseLandmarker` in a 
 
 ## Decisions (keep unless the user changes them)
 
+- Camera: default `1280x960` (4:3 = whole sensor; 16:9 crops it) with `resizeMode: none` so Chrome does not crop/scale, and zoom set to its minimum where exposed. The rear camera also prefers a lens labelled wide/0.5.
 - One screen only. Allowed extras: one quiet status line (loading, errors, FPS) and a tiny "Export (n)" link. No other UI. Settings only through URL parameters (`camera=rear`, `model`, `res`, `minCutoff`/`beta`/`dCutoff`, `debug=1`, `demo=1`).
 - Layout: landscape = camera left, 3D right; portrait = camera top, 3D below; both as large as possible (watched from 2–3 m). Camera image is letterboxed (`contain`); the 3D view uses the phone's vertical field of view and fills its pane.
 - Front camera: mirror the display only (CSS `scaleX(-1)` on both views); never flip data. Rear camera is not mirrored. Orbit drags are flipped when mirrored.

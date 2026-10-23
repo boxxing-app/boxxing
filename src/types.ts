@@ -11,7 +11,7 @@ export const NAMES:Record<number,string>={0:'nose',11:'leftShoulder',12:'rightSh
 /** Heels 29/30, foot index 31/32 and ankles 27/28: the points that can touch the floor. */
 export const FOOT=[27,28,29,30,31,32];
 export const LINKS:[number,number][]=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[27,31],[28,30],[30,32],[28,32],[0,7],[0,8]];
-export const DEFAULT_SETTINGS:Settings={model:'full',resolution:'1280x720',facing:'user',deviceId:'',orientation:'landscape'};
+export const DEFAULT_SETTINGS:Settings={model:'full',resolution:'1280x960',facing:'user',deviceId:'',orientation:'landscape'};
 /** World points are metres. Tuned so a 45 cm, 150 ms jab keeps >90% of its reach at 20 fps. */
 export const WORLD_FILTER:FilterSettings={minCutoff:1.5,beta:5,dCutoff:2};
 /** Image points are 0–1 of the frame. About 2.5 m per frame height at 3 m, so beta is scaled to match the world setting. */

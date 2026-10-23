@@ -22,7 +22,7 @@ The front camera is shown mirrored, like a mirror. The saved data is never flipp
 |---|---|---|
 | `camera` | `rear` | front |
 | `model` | `lite`, `full`, `heavy` | `full` |
-| `res` | `640x480`, `1280x720`, `1920x1080` | `1280x720` |
+| `res` | `640x480`, `1280x960`, `1920x1440` (4:3, whole sensor); `1280x720`, `1920x1080` (16:9, cropped) | `1280x960` |
 | `minCutoff`, `beta`, `dCutoff` | smoothing of the 3D points (remembered on the phone) | `1.5`, `5`, `2` |
 | `debug=1` | green raw skeleton on the avatar, inference time, wrist visibility | off |
 | `demo=1` | synthetic poses, no camera | off |

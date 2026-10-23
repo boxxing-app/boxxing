@@ -6,7 +6,7 @@ Mobile web app (Vite + TypeScript, MediaPipe Tasks Vision `PoseLandmarker` in a 
 
 - Node 22.12+. `npm ci`, `npm run assets` (models from storage.googleapis.com + WASM into `public/`, git-ignored), `npm run dev`, `npm test`, `npm run build`.
 - Browser check: `BASE_PATH=/boxxing/ npm run build && node scripts/check-ui.mjs [outDir]`. Uses the global Playwright and Chromium's fake camera; checks portrait/landscape `?demo=1`, no scrolling, no extras, no console errors, avatar moves, mirror, save/export, and the camera path.
-- Deploy: push to `main` → `.github/workflows/pages.yml` builds with `BASE_PATH=/<repo>/` and publishes `dist/` to https://yabsramelaku62-a11y.github.io/boxxing/ (Settings → Pages → Source: GitHub Actions).
+- Deploy: push to `main` → `.github/workflows/pages.yml` builds with `BASE_PATH=/<repo>/` and publishes `dist/` to https://boxxing-app.github.io/boxxing/ (Settings → Pages → Source: GitHub Actions).
 
 ## Files
 

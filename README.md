@@ -2,7 +2,7 @@
 
 One screen for finding where to put your phone for shadow boxing. The camera view shows your 2D skeleton, the 3D view shows an avatar copying you. Move the phone, judge how well the avatar copies you, type a Match % and save the good positions.
 
-**Open:** https://yabsramelaku62-a11y.github.io/boxxing/ (Android Chrome; the camera needs HTTPS)
+**Open:** https://boxxing-app.github.io/boxxing/ (Android Chrome; the camera needs HTTPS)
 
 Everything runs on the phone. Nothing is uploaded.
 

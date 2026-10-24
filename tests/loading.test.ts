@@ -69,22 +69,22 @@ describe('tracking startup watchdog',()=>{
  let tracker:Tracker;
  beforeEach(()=>{FakeWorker.all=[];vi.stubGlobal('Worker',FakeWorker);vi.stubGlobal('cancelAnimationFrame',vi.fn());tracker=new Tracker({srcObject:null} as HTMLVideoElement,()=>{},vi.fn())});
  it('allows continuing progress without a total loading deadline',async()=>{
-  const pending=tracker.load('full'),worker=FakeWorker.all[0];
+  const pending=tracker.load('hand'),worker=FakeWorker.all[0];
   for(let i=0;i<40;i++){worker.send({type:'progress',phase:'download',message:'Downloading Full',timeoutMs:45000});await vi.advanceTimersByTimeAsync(20000)}
   expect(worker.terminate).not.toHaveBeenCalled();expect(FakeWorker.all).toHaveLength(1);
   worker.send({type:'ready',delegate:'GPU'});await pending;expect(tracker.ready).toBe(true);expect(vi.getTimerCount()).toBe(0);tracker.stop();
  });
  it('respects a backed-off download stall limit',async()=>{
-  const pending=tracker.load('full'),worker=FakeWorker.all[0];
+  const pending=tracker.load('hand'),worker=FakeWorker.all[0];
   worker.send({type:'progress',phase:'download',message:'Retrying download',timeoutMs:255000});
   await vi.advanceTimersByTimeAsync(240000);expect(worker.terminate).not.toHaveBeenCalled();
   worker.send({type:'ready',delegate:'GPU'});await pending;tracker.stop();
  });
  it('retries a GPU hang on CPU with increasing startup limits and bounded attempts',async()=>{
-  const result=tracker.load('full').catch(e=>e),gpu=FakeWorker.all[0];
+  const result=tracker.load('hand').catch(e=>e),gpu=FakeWorker.all[0];
   gpu.send({type:'progress',phase:'gpu',message:'Starting GPU'});
   await vi.advanceTimersByTimeAsync(30000);expect(gpu.terminate).toHaveBeenCalledOnce();expect(FakeWorker.all).toHaveLength(1);
-  await vi.advanceTimersByTimeAsync(1000);const cpu=FakeWorker.all[1];expect(cpu.postMessage).toHaveBeenCalledWith({type:'init',variant:'full',delegate:'CPU'});
+  await vi.advanceTimersByTimeAsync(1000);const cpu=FakeWorker.all[1];expect(cpu.postMessage).toHaveBeenCalledWith({type:'init',variant:'hand',delegate:'CPU'});
   gpu.send({type:'ready',delegate:'GPU'});expect(tracker.ready).toBe(false);
   cpu.send({type:'progress',phase:'cpu',message:'Starting CPU'});
   await vi.advanceTimersByTimeAsync(119999);expect(cpu.terminate).not.toHaveBeenCalled();
@@ -93,7 +93,7 @@ describe('tracking startup watchdog',()=>{
   await vi.advanceTimersByTimeAsync(1);expect((await result).message).toContain('after 3 attempts');expect(vi.getTimerCount()).toBe(0);expect(FakeWorker.all).toHaveLength(3);
  });
  it('cancels pending backoff without launching another worker',async()=>{
-  const result=tracker.load('full').catch(e=>e),worker=FakeWorker.all[0];worker.send({type:'progress',phase:'gpu',message:'Starting GPU'});
+  const result=tracker.load('hand').catch(e=>e),worker=FakeWorker.all[0];worker.send({type:'progress',phase:'gpu',message:'Starting GPU'});
   await vi.advanceTimersByTimeAsync(30000);tracker.stop();await vi.advanceTimersByTimeAsync(1000000);
   expect((await result).message).toContain('cancelled');expect(FakeWorker.all).toHaveLength(1);expect(vi.getTimerCount()).toBe(0);
  });

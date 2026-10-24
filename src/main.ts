@@ -22,7 +22,7 @@ try{viewer=new Viewer($('world-view'))}catch(e){console.warn(e)}
 const filter=new PoseFilter(),sides:Side[]=['left','right'];
 const shapes:Record<Side,HandShape>={left:new HandShape(),right:new HandShape()};
 const position:Record<Side,Euro[]>={left:[new Euro(),new Euro(),new Euro()],right:[new Euro(),new Euro(),new Euro()]};
-if(viewer)viewer.onDoubleTap=()=>{for(const s of sides)shapes[s].reset()};// measure finger lengths again
+if(viewer)viewer.onDoubleTap=()=>{for(const s of sides)shapes[s].reset()};// measure finger lengths again (the viewer resets the table and box)
 let tracker:Tracker|null=null,facing:Facing=cfg.facing,statusText=viewer?'Starting…':'The 3D view needs WebGL, which this browser does not provide.',statusError=!viewer;
 let current:{side:Side;distance:number;score:number}[]=[];const seen:Partial<Record<Side,Seen>>={};
 // Phone tilt levels the 3D view. Android gives it without asking; iOS asks on the first tap.
@@ -40,19 +40,19 @@ function renderStatus(){
   const hands=[...current].sort((a,b)=>a.side<b.side?1:-1);
   text=`hand · ${cfg.demo?'demo':tracker?.delegate} · ${fps.toFixed(0)} fps · ${hands.length?hands.map(h=>`${h.side[0].toUpperCase()} ${Math.round(h.distance*100)} cm`).join(' · '):'no hands in view'}`;
   if(cfg.debug){const up=cameraUp(tilt.up,screenAngle(),facing),angles=up&&phoneAngles(up);
-   text+=` · ${cfg.demo?'1280×960':`${video.videoWidth}×${video.videoHeight}`} · inference ${(quantile(inference,.5)??0).toFixed(0)} ms${hands.map(h=>` · ${h.side[0].toUpperCase()} ${h.score.toFixed(2)}`).join('')} · ${angles?`pitch ${angles.pitchDeg.toFixed(0)}° roll ${angles.rollDeg.toFixed(0)}° (${tilt.source})`:'no tilt'}${sides.some(s=>!shapes[s].calibrated)?' · measuring':''}`}
+   text+=` · ${cfg.demo?'1280×960':`${video.videoWidth}×${video.videoHeight}`} · ${cfg.demo?'demo':tracker?.mode} · 3D ×${viewer?.pixelRatio.toFixed(2)} · inference ${(quantile(inference,.5)??0).toFixed(0)} ms${hands.map(h=>` · ${h.side[0].toUpperCase()} ${h.score.toFixed(2)}`).join('')} · ${angles?`pitch ${angles.pitchDeg.toFixed(0)}° roll ${angles.rollDeg.toFixed(0)}° (${tilt.source})`:'no tilt'}${sides.some(s=>!shapes[s].calibrated)?' · measuring':''}`}
  }
  statusLine.textContent=text;statusLine.classList.toggle('error',error);
 }
 setInterval(renderStatus,500);renderStatus();
 
-function applyMirror(){const mirrored=facing==='user';for(const id of ['cam-view','world-view'])$(id).classList.toggle('mirror',mirrored);if(viewer)viewer.mirrored=mirrored}
+function applyMirror(){const mirrored=facing==='user';for(const id of ['cam-view','world-view'])$(id).classList.toggle('mirror',mirrored)}
 const aspect=()=>cfg.demo?DEMO_CAMERA.aspect:(video.videoWidth||4)/(video.videoHeight||3);
 
 function onSample(s:TrackingSample){
  const t=s.timestamp;times.push(t);inference.push(s.inferenceMs);if(times.length>30){times.shift();inference.shift()}
  const a=aspect(),f=focal(cfg.fov,a),hands=trackSides(s.hands,seen,t);current=[];
- viewer?.setCamera(f,a);viewer?.setLevel(levelQuaternion(cameraUp(tilt.up,screenAngle(),facing)));
+ viewer?.setCamera(f,a);const up=cameraUp(tilt.up,screenAngle(),facing);viewer?.setLevel(up?levelQuaternion(up):null);
  draw2d(hands.map(h=>({side:h.side,points:h.hand.landmarks})));
  for(const {side,hand} of hands){
   const {world,landmarks}=hand;seen[side]={x:landmarks[0].x,y:landmarks[0].y,t};

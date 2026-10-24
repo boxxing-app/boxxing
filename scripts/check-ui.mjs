@@ -34,7 +34,7 @@ for(const [name,viewport,query] of [['portrait',{width:390,height:844},'?demo=1'
  const l=await layout(page),file=name.replace(' ','-');await page.screenshot({path:`${out}/demo-${file}.png`});
  check(l.scrollW<=l.w&&l.scrollH<=l.h,`${name}: fits one screen without scrolling (${l.scrollW}x${l.scrollH} in ${l.w}x${l.h})`);
  check(l.controls.length===0,`${name}: no buttons or fields (${l.controls})`);
- const status=name.includes('debug')?/^hand · demo · \d+ fps · R \d+ cm · L \d+ cm · 1280×960 · inference \d+ ms · R 0\.97 · L 0\.97 · no tilt( · measuring)?$/:/^hand · demo · \d+ fps · R \d+ cm · L \d+ cm$/;
+ const status=name.includes('debug')?/^hand · demo · \d+ fps · R \d+ cm · L \d+ cm · 1280×960 · demo · 3D ×\d\.\d\d · inference \d+ ms · R 0\.97 · L 0\.97 · no tilt( · measuring)?$/:/^hand · demo · \d+ fps · R \d+ cm · L \d+ cm$/;
  check(status.test(l.text),`${name}: only the status line ("${l.text}")`);
  const side=name.startsWith('landscape')?l.cam.x<l.world.x&&Math.abs(l.cam.y-l.world.y)<1:l.cam.y<l.world.y&&Math.abs(l.cam.x-l.world.x)<1;
  check(side&&Math.abs(l.cam.w*l.cam.h+l.world.w*l.world.h-l.w*l.h)<2,`${name}: camera ${name.startsWith('landscape')?'left':'top'}, 3D ${name.startsWith('landscape')?'right':'below'}, filling the screen`);
@@ -50,7 +50,7 @@ for(const [name,viewport,query] of [['portrait',{width:390,height:844},'?demo=1'
  await sleep(3000);status=await page.textContent('#status');
  const video=await page.evaluate(()=>{const v=document.querySelector('video');return{w:v.videoWidth,h:v.videoHeight,playing:!v.paused}});
  await page.screenshot({path:`${out}/fake-camera.png`});
- check(/^hand · (GPU|CPU) · \d+ fps · no hands in view$/.test(status)&&video.w>0&&video.playing,`fake camera: starts on load, the hand model loads and tracking runs ("${status}", ${video.w}x${video.h})`);
+ check(/^hand · (GPU|CPU) · \d+ fps · no hands in view$/.test(status.replace(/ · 1280×\d+.*$/,''))&&video.w>0&&video.playing,`fake camera: starts on load, the hand model loads and tracking runs ("${status}", ${video.w}x${video.h})`);
  check(await page.isHidden('#start'),'fake camera: no Start camera overlay needed');
  check(!errors.length,`fake camera: no console errors ${errors.join(' | ')}`);await context.close();}
 

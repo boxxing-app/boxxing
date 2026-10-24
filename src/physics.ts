@@ -8,6 +8,16 @@ export const TABLE={halfX:.3,halfZ:.28};
 const G=9.81,PINCH_ON=.025,PINCH_OFF=.04,GRAB_REACH=.03,FINGER_R=.011,FRICTION=5,MAX_SPEED=3;
 /** One hand's 21 joints in the physics frame (metres). */
 export type HandInput={side:Side;joints:T.Vector3[]};
+/** How far below your palms the table's top goes, and how close to the camera's height it may come (level frame, metres). */
+export const TABLE_BELOW_HANDS=.12,TABLE_BELOW_CAMERA=.06;
+/** Where the table goes (level frame, camera at the origin): centred under your palms, its top 12 cm below them but always
+ * below the camera, and turned to face the camera's heading (`ahead` = the camera's forward direction). */
+export function tablePose(palms:T.Vector3[],ahead:T.Vector3){
+ const centre=palms.reduce((s,p)=>s.add(p),new T.Vector3()).divideScalar(Math.max(1,palms.length));
+ centre.y=Math.min(centre.y-TABLE_BELOW_HANDS,-TABLE_BELOW_CAMERA);
+ const flat=new T.Vector3(ahead.x,0,ahead.z);if(flat.lengthSq()<1e-6)flat.set(0,0,-1);
+ return{position:centre,quaternion:new T.Quaternion().setFromUnitVectors(new T.Vector3(0,0,-1),flat.normalize())};
+}
 /** A hand's frame: origin at `origin`, y along the middle finger's knuckle, x across the knuckles (index side). */
 export function palmQuaternion(p:T.Vector3[]){const y=p[9].clone().sub(p[0]).normalize(),x0=p[5].clone().sub(p[17]),z=x0.clone().cross(y).normalize(),x=y.clone().cross(z);return new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(x,y,z))}
 const isPinching=(p:T.Vector3[],was:boolean)=>{const d=p[4].distanceTo(p[8]);return was?d<PINCH_OFF:d<PINCH_ON};

@@ -2,7 +2,7 @@
 import {describe,expect,it} from 'vitest';
 import fs from 'node:fs';
 import * as T from 'three';
-import {BOX_HALF,BoxWorld,TABLE,palmQuaternion,type HandInput} from '../src/physics';
+import {BOX_HALF,BoxWorld,TABLE,TABLE_BELOW_CAMERA,TABLE_BELOW_HANDS,palmQuaternion,tablePose,type HandInput} from '../src/physics';
 import {HandModel} from '../src/handmodel';
 import {demoHand,mirror} from '../src/demo';
 import {V} from '../src/viewer';
@@ -37,6 +37,16 @@ describe('box on the table',()=>{
  it('a pinch away from the box does not grab it, and a box that falls off the table comes back',()=>{
   const w=new BoxWorld();run(w,.2,()=>[{side:'left',joints:pinch(new T.Vector3(.2,.1,0))}]);expect(w.grabbed).toBeNull();
   w.pos.set(TABLE.halfX+.1,.2,0);run(w,1.5);expect(w.pos.x).toBe(0);expect(w.pos.y).toBeCloseTo(BOX_HALF,3);
+ });
+ it('the table goes under your palms, below the camera, facing the camera, even when the phone looks up',()=>{
+  const palms=[new T.Vector3(-.1,-.05,-.4),new T.Vector3(.1,-.03,-.44)],level=new T.Vector3(0,0,-1);
+  const a=tablePose(palms,level);expect(a.position.x).toBeCloseTo(0);expect(a.position.z).toBeCloseTo(-.42);expect(a.position.y).toBeCloseTo(-.04-TABLE_BELOW_HANDS);
+  expect(new T.Vector3(0,0,-1).applyQuaternion(a.quaternion).angleTo(level)).toBeCloseTo(0);
+  // Phone leaning back (lens 30° up) with the hands raised above it: still below the camera, still level, still facing it.
+  const up=new T.Vector3(0,Math.sin(Math.PI/6),-Math.cos(Math.PI/6)),b=tablePose([new T.Vector3(.05,.1,-.4)],up);
+  expect(b.position.y).toBeCloseTo(-TABLE_BELOW_CAMERA);expect(new T.Vector3(0,1,0).applyQuaternion(b.quaternion).y).toBeCloseTo(1);expect(new T.Vector3(0,0,-1).applyQuaternion(b.quaternion).angleTo(level)).toBeCloseTo(0);
+  // Turned to the side: the table turns with the camera's heading.
+  const side=new T.Vector3(-1,-.3,-1),c=tablePose(palms,side);expect(new T.Vector3(0,0,-1).applyQuaternion(c.quaternion).angleTo(new T.Vector3(-1,0,-1).normalize())).toBeCloseTo(0);
  });
  it('the palm frame turns with the hand',()=>{const a=palmQuaternion(hand(new T.Vector3(),0,0)),b=palmQuaternion(hand(new T.Vector3(),0,40));expect(a.angleTo(b)*180/Math.PI).toBeCloseTo(40,0)});
 });

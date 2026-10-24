@@ -2,7 +2,7 @@ import * as T from 'three';
 import {LINKS,type Point} from './types';
 import type {Side} from './hands';
 import {HandModel} from './handmodel';
-import {BOX_HALF,BoxWorld,TABLE} from './physics';
+import {BOX_HALF,BoxWorld,TABLE,tablePose} from './physics';
 /** MediaPipe camera axes (x right, y down, z forward) → Three.js (y up, z toward the viewer). */
 export const V=(p:Point)=>new T.Vector3(p.x,-p.y,-p.z);
 export const COLORS:Record<Side,number>={right:0xb9f47c,left:0x7cc8f4};
@@ -47,7 +47,7 @@ class HandView{
  }
 }
 /** The 3D view, fixed at the phone: it sees exactly what the camera sees, levelled by the phone's tilt. Your hands (rigged models)
- * and a table with a box you can push and pinch-grab. Double-tap puts the table and box back in front of the camera. */
+ * and a table with a box you can push and pinch-grab. The table appears under your hands once they are in view; double-tap moves it there again. */
 export class Viewer{
  renderer:T.WebGLRenderer;scene=new T.Scene();camera=new T.PerspectiveCamera(50,1,.01,20);world=new T.Group();
  hands:Record<Side,HandView>={left:new HandView(COLORS.left),right:new HandView(COLORS.right)};
@@ -56,6 +56,8 @@ export class Viewer{
  private level=new T.Quaternion();private levelTarget=new T.Quaternion();private levelKnown=false;
  /** Smoothed tracker delay (result arrival − capture) and frame interval, in ms: the view runs this far behind to blend between results. */
  private lag=30;private interval=40;private lastT=0;
+ /** The table waits for your hands: it is placed under them once they have been in view for a moment. */
+ private placed=false;private handsSince=0;
  private resize:ResizeObserver;private frame=0;private lastFrame=0;private dirty=true;private frameTimes:number[]=[];private goodWindows=0;private lastTap=0;
  constructor(private host:HTMLElement,base=import.meta.env.BASE_URL){
   // No MSAA: the edges are small at phone pixel densities, and it is the most expensive part of drawing this scene.
@@ -73,7 +75,7 @@ export class Viewer{
   for(const side of ['left','right'] as Side[])HandModel.load(`${base}hands/${side}.glb`,SKIN[side]).then(m=>{this.hands[side].setModel(m);this.dirty=true}).catch(e=>console.warn('Hand model unavailable; showing the skeleton.',e));
   this.renderer.domElement.style.touchAction='manipulation';
   this.renderer.domElement.addEventListener('pointerup',()=>{const now=performance.now();if(now-this.lastTap<350){this.lastTap=0;this.reset();this.onDoubleTap()}else this.lastTap=now});
-  this.resize=new ResizeObserver(()=>this.fit());this.resize.observe(host);this.placeTable();this.fit();this.animate();
+  this.resize=new ResizeObserver(()=>this.fit());this.resize.observe(host);this.table.visible=false;this.fit();this.animate();
  }
  /** A tracker result: joint positions in the camera frame (Three.js axes, metres), captured at time t (performance.now()). */
  update(side:Side,t:number,joints:T.Vector3[]|null,raw:T.Vector3[]|null=null){
@@ -82,17 +84,12 @@ export class Viewer{
   this.hands[side].push(t,joints,raw,now);
  }
  /** Rotation from the camera frame to a level frame (from the phone's tilt), or null while unknown. The view eases toward it. */
- setLevel(level:T.Quaternion|null){if(!level)return;this.levelTarget.copy(level);if(!this.levelKnown){this.levelKnown=true;this.level.copy(level);this.placeTable()}}
+ setLevel(level:T.Quaternion|null){if(!level)return;this.levelTarget.copy(level);if(!this.levelKnown){this.levelKnown=true;this.level.copy(level);this.reset()}}
  /** The camera's focal length (frame heights) and frame shape. The 3D view shows exactly the camera's frame, letterboxed like the image. */
- setCamera(f:number,frameAspect:number){if(Math.abs(f-this.f)<1e-6&&Math.abs(frameAspect-this.frameAspect)<1e-6)return;this.f=f;this.frameAspect=frameAspect;this.fit();this.placeTable()}
- /** Put the table and a fresh box in front of the camera. */
- reset(){this.placeTable();this.box.reset();this.dirty=true}
- /** The table goes level, about 45 cm out along the camera's view and low in the picture, facing the camera. */
- private placeTable(){
-  const ahead=new T.Vector3(0,0,-1).applyQuaternion(this.levelTarget),flat=new T.Vector3(ahead.x,0,ahead.z);if(flat.lengthSq()<1e-6)flat.set(0,0,-1);flat.normalize();
-  const centre=ahead.multiplyScalar(.45);centre.y-=.45*(.5/this.f)*.6;
-  this.table.position.copy(centre);this.table.quaternion.setFromUnitVectors(new T.Vector3(0,0,-1),flat);this.dirty=true;
- }
+ setCamera(f:number,frameAspect:number){if(Math.abs(f-this.f)<1e-6&&Math.abs(frameAspect-this.frameAspect)<1e-6)return;this.f=f;this.frameAspect=frameAspect;this.fit()}
+ /** Take the table away until your hands are in view again, then place it under them with a fresh box. */
+ reset(){this.placed=false;this.handsSince=0;this.table.visible=false;this.box.reset();this.dirty=true}
+ private placeUnder(palms:T.Vector3[]){const pose=tablePose(palms,new T.Vector3(0,0,-1).applyQuaternion(this.levelTarget));this.table.position.copy(pose.position);this.table.quaternion.copy(pose.quaternion);this.table.visible=true;this.placed=true;this.box.reset();this.dirty=true}
  fit(){const w=this.host.clientWidth,h=Math.max(1,this.host.clientHeight);this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.fov=2*Math.atan(Math.max(1,this.frameAspect/this.camera.aspect)/2/this.f)*180/Math.PI;this.camera.updateProjectionMatrix();this.dirty=true}
  /** Lower the resolution when frames take too long, raise it again when there is room. */
  private adapt(dt:number){
@@ -109,7 +106,11 @@ export class Viewer{
   const at=now-this.lag-this.interval;let shown=false;for(const h of Object.values(this.hands)){const was=h.visible;shown=h.draw(at,now)||shown;if(was!==h.visible)this.dirty=true}
   // Physics in the table's frame: hands go camera frame → level → table.
   const toTable=this.table.quaternion.clone().invert(),hands=(['left','right'] as Side[]).filter(s=>this.hands[s].visible).map(side=>({side,joints:this.hands[side].shown.map(p=>p.clone().applyQuaternion(this.level).sub(this.table.position).applyQuaternion(toTable))}));
-  const busy=this.box.moving||hands.length>0;
+  if(!this.placed){
+   if(!hands.length)this.handsSince=0;else if(!this.handsSince)this.handsSince=now;
+   else if(now-this.handsSince>300)this.placeUnder((['left','right'] as Side[]).filter(side=>this.hands[side].visible).map(side=>this.hands[side].shown[9].clone().applyQuaternion(this.level)));
+  }
+  const busy=this.placed&&(this.box.moving||hands.length>0);
   if(busy){
    this.box.step(dt,hands);this.boxMesh.position.copy(this.box.pos);this.boxMesh.quaternion.copy(this.box.quat);
    this.boxMaterial.color.setHex(this.box.grabbed?0xffd166:hands.some(h=>this.box.isPinching(h.side))?0xf7b97a:0xf4a259);

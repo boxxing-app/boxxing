@@ -5,7 +5,9 @@ import {cameraContext,requestCamera} from './camera-access';
 export type HandSample={landmarks:Point[];world:Point[];label:string;score:number};
 export type TrackingSample={timestamp:number;hands:HandSample[];inferenceMs:number;mediaTime:number;presentedFrames:number|null;captureTime:number|null;pipelineStart:number};
 export class Tracker{
- worker:Worker|null=null;stream:MediaStream|null=null;delegate='';running=false;busy=false;ready=false;request=0;lastTime=-1;cameraSettings:MediaTrackSettings|null=null;generation=0;
+ worker:Worker|null=null;stream:MediaStream|null=null;delegate='';running=false;busy=false;ready=false;
+ /** 'stream': camera frames go straight to the worker; 'frames': the page copies each frame (fallback). */
+ mode:'stream'|'frames'='frames';request=0;lastTime=-1;cameraSettings:MediaTrackSettings|null=null;generation=0;
  private cancelLoading:(()=>void)|null=null;
  private cameraRequest:AbortController|null=null;
  private pending:Omit<TrackingSample,'hands'|'inferenceMs'>|null=null;
@@ -25,7 +27,7 @@ export class Tracker{
    await widest(stream);if(stale())return;
    this.video.muted=true;this.video.playsInline=true;this.video.srcObject=stream;this.onStatus('Camera allowed. Starting preview…');await this.video.play();if(stale())return;cameraConnected=true;
    this.cameraSettings=stream.getVideoTracks()[0].getSettings();this.onStatus('Camera connected · loading '+s.model+' model…');await this.load(s.model);
-   if(generation!==this.generation)return;this.running=true;this.onStatus('Camera live · '+this.delegate);this.loop();
+   if(generation!==this.generation)return;this.running=true;this.onStatus('Camera live · '+this.delegate);if(!this.startStream())this.loop();
   }catch(e){if(generation!==this.generation)return;this.stop();this.onStatus(e instanceof Error?e.message:String(e),true,!cameraConnected)}
  }
  load(variant:Settings['model']){
@@ -52,7 +54,12 @@ export class Tracker{
      if(this.worker!==worker)return;const m=e.data;
      if(m.type==='progress'&&!settled){phase=m.phase;message=m.message;this.onStatus(message);arm(m.timeoutMs)}
      else if(m.type==='ready'&&!settled){settled=true;clear();this.cancelLoading=null;this.delegate=m.delegate;this.ready=true;resolve()}
+     else if(m.type==='result'&&typeof m.time==='number'){if(this.mode==='stream'&&this.running)this.onSample({timestamp:m.time-performance.timeOrigin,hands:m.hands,inferenceMs:m.inferenceMs,mediaTime:0,presentedFrames:null,captureTime:null,pipelineStart:m.time-performance.timeOrigin})}
      else if(m.type==='result'){this.busy=false;if(this.pending)this.onSample({...m,...this.pending});this.pending=null}
+     else if(m.type==='streamFormat'){
+      // Streamed frames must look exactly like the video the page shows; a rotated or differently sized frame would misplace the hands.
+      if(m.rotation||m.width!==this.video.videoWidth||m.height!==this.video.videoHeight){worker.postMessage({type:'stopStream'});this.mode='frames';this.loop()}
+     }
      else if(m.type==='error'){if(settled){this.stop();this.onStatus(m.message,true)}else if(phase==='gpu')retry(m.message);else fail(new Error(m.message))}
     };
     worker.postMessage({type:'init',variant,delegate:mode});
@@ -60,6 +67,12 @@ export class Tracker{
    this.cancelLoading=()=>fail(new Error('Model loading cancelled.'));
    launch();
   });
+ }
+ /** Hand the camera track's frames straight to the worker where the browser can (Chrome: MediaStreamTrackProcessor). */
+ private startStream(){
+  const Processor=(globalThis as {MediaStreamTrackProcessor?:new(o:{track:MediaStreamTrack;maxBufferSize?:number})=>{readable:ReadableStream}}).MediaStreamTrackProcessor,track=this.stream?.getVideoTracks()[0];
+  if(!Processor||!track||!this.worker)return false;
+  try{const {readable}=new Processor({track,maxBufferSize:1});this.worker.postMessage({type:'stream',readable},[readable as unknown as Transferable]);this.mode='stream';return true}catch{this.mode='frames';return false}
  }
  private loop=()=>{
   if(!this.running)return;
@@ -74,7 +87,7 @@ export class Tracker{
    this.worker!.postMessage({type:'frame',bitmap,timestamp:t},[bitmap]);
   }catch(e){this.busy=false;this.onStatus('Could not read camera frame: '+String(e),true)}
  }
- stop(){this.generation++;this.running=false;this.ready=false;this.cameraRequest?.abort();this.cameraRequest=null;this.cancelLoading?.();this.cancelLoading=null;this.worker?.terminate();this.worker=null;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;if('cancelVideoFrameCallback'in this.video)this.video.cancelVideoFrameCallback(this.request);cancelAnimationFrame(this.request);this.busy=false;this.pending=null;this.lastTime=-1;this.video.srcObject=null;}
+ stop(){this.generation++;this.running=false;this.ready=false;this.mode='frames';this.cameraRequest?.abort();this.cameraRequest=null;this.cancelLoading?.();this.cancelLoading=null;this.worker?.terminate();this.worker=null;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;if('cancelVideoFrameCallback'in this.video)this.video.cancelVideoFrameCallback(this.request);cancelAnimationFrame(this.request);this.busy=false;this.pending=null;this.lastTime=-1;this.video.srcObject=null;}
 }
 /** Zoom all the way out where the browser exposes camera zoom (it may not; then this does nothing). */
 async function widest(stream:MediaStream){try{const track=stream.getVideoTracks()[0],zoom=(track.getCapabilities?.() as {zoom?:{min:number}}|undefined)?.zoom,current=(track.getSettings() as {zoom?:number}).zoom;if(zoom&&current!==undefined&&zoom.min<current)await track.applyConstraints({advanced:[{zoom:zoom.min} as MediaTrackConstraintSet]})}catch{}}

@@ -46,7 +46,27 @@ async function initialize(variant:Variant,delegate:'GPU'|'CPU'){
  model=await HandLandmarker.createFromOptions(files,{baseOptions:{modelAssetBuffer:buffer,delegate},canvas:new OffscreenCanvas(1,1),runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5});
  self.postMessage({type:'ready',delegate});
 }
+const hands=(result:ReturnType<HandLandmarker['detectForVideo']>)=>result.landmarks.map((landmarks,i)=>({landmarks,world:result.worldLandmarks[i]??[],label:result.handedness[i]?.[0]?.categoryName??'',score:result.handedness[i]?.[0]?.score??0}));
+// MediaPipe needs strictly increasing timestamps; use this worker's clock for both frame paths.
+let lastStamp=0;const stamp=()=>lastStamp=Math.max(lastStamp+1,performance.now());
+let reader:ReadableStreamDefaultReader<VideoFrame>|null=null;
+/** Frames streamed straight from the camera track (MediaStreamTrackProcessor, newest frame only): no copy on the page's thread.
+ * Results carry an absolute time (timeOrigin + now) so the page can convert it to its own clock. */
+async function pump(readable:ReadableStream<VideoFrame>){
+ const own=reader=readable.getReader();let first=true;
+ while(reader===own){
+  const {value:frame,done}=await own.read();if(done||!frame)break;
+  try{
+   if(first){first=false;self.postMessage({type:'streamFormat',width:frame.displayWidth,height:frame.displayHeight,rotation:(frame as VideoFrame&{rotation?:number}).rotation??0})}
+   if(!model||reader!==own)continue;
+   const t=stamp(),result=model.detectForVideo(frame,t);
+   self.postMessage({type:'result',time:performance.timeOrigin+t,hands:hands(result),inferenceMs:performance.now()-t});
+  }finally{frame.close()}
+ }
+}
 self.onmessage=async(e:MessageEvent)=>{const m=e.data;try{
  if(m.type==='init')await initialize(m.variant,m.delegate??'GPU');
- else if(m.type==='frame'&&model){const start=performance.now();try{const result=model.detectForVideo(m.bitmap,m.timestamp);self.postMessage({type:'result',timestamp:m.timestamp,hands:result.landmarks.map((landmarks,i)=>({landmarks,world:result.worldLandmarks[i]??[],label:result.handedness[i]?.[0]?.categoryName??'',score:result.handedness[i]?.[0]?.score??0})),inferenceMs:performance.now()-start})}finally{m.bitmap.close()}}
+ else if(m.type==='stream')pump(m.readable).catch(error=>self.postMessage({type:'error',message:errorText(error)}));
+ else if(m.type==='stopStream'){const old=reader;reader=null;await old?.cancel().catch(()=>{})}
+ else if(m.type==='frame'&&model){const start=performance.now();try{const result=model.detectForVideo(m.bitmap,stamp());self.postMessage({type:'result',timestamp:m.timestamp,hands:hands(result),inferenceMs:performance.now()-start})}finally{m.bitmap.close()}}
 }catch(error){self.postMessage({type:'error',message:errorText(error)})}};

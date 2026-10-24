@@ -1,6 +1,6 @@
-# Boxxing · phone position finder
+# Hand tracker
 
-One screen for finding where to put your phone for shadow boxing. The camera view shows your 2D skeleton, the 3D view shows an avatar copying you. Move the phone, judge how well the avatar copies you, type a Match % and save the good positions.
+Live 3D hand tracking from one phone camera. The camera view shows the tracked points on your hands; the 3D view shows both hands, with every finger, where they are in front of the phone. Hold your hands close to the phone (roughly 20–80 cm).
 
 **Open:** https://boxxing-app.github.io/boxxing/ (Android Chrome; the camera needs HTTPS)
 
@@ -9,25 +9,23 @@ Everything runs on the phone. Nothing is uploaded.
 ## Use
 
 1. Open the page. The front camera starts. If the browser asks for a tap, tap **Start camera**.
-2. Stand in your spot, still, with your whole body in view, until the status line stops saying "stand still to calibrate".
-3. Box. Drag the 3D view to look around; double-tap it to go back to the phone's view.
-4. To save a position: type your **Match %** (0–100), tap **Save this position**, walk back during the 10 beeps, hold your fighting stance for 5 seconds until the double beep. It shows "Saved #n · body angle …°".
-5. **Export (n)** downloads every saved position as one JSON file.
+2. Show both hands, open, for a second: the app measures your finger lengths from the first frames.
+3. Drag the 3D view to look around, pinch to zoom, double-tap to go back to the phone's view and measure the fingers again.
 
-The front camera is shown mirrored, like a mirror. The saved data is never flipped.
+Green is your right hand, blue your left. The front camera is shown mirrored, like a mirror; the data is never flipped.
 
 ### URL settings
 
 | Parameter | Values | Default |
 |---|---|---|
 | `camera` | `rear` | front |
-| `model` | `lite`, `full`, `heavy` | `full` |
 | `res` | `640x480`, `1280x960`, `1920x1440` (4:3, whole sensor); `1280x720`, `1920x1080` (16:9, cropped) | `1280x960` |
-| `minCutoff`, `beta`, `dCutoff` | smoothing of the 3D points (remembered on the phone) | `1.5`, `5`, `2` |
-| `debug=1` | green raw skeleton on the avatar, inference time, wrist visibility | off |
-| `demo=1` | synthetic poses, no camera | off |
+| `fov` | the camera's field of view across the long side of the picture, in degrees (20–150). Only sets the depth scale. | `70` |
+| `minCutoff`, `beta`, `dCutoff` | smoothing of the hand shape (remembered on the phone) | `1.5`, `5`, `2` |
+| `debug=1` | white raw landmarks on the 3D hands, camera size, inference time, handedness scores | off |
+| `demo=1` | synthetic hands, no camera | off |
 
-Example: `…/boxxing/?camera=rear&model=heavy&debug=1`
+Example: `…/boxxing/?camera=rear&debug=1`
 
 ## Develop
 
@@ -35,7 +33,7 @@ Node 22.12+.
 
 ```sh
 npm ci
-npm run assets   # downloads the MediaPipe models, copies the WASM
+npm run assets   # downloads the MediaPipe hand model, copies the WASM
 npm run dev      # http://localhost:4173 (a phone needs HTTPS)
 npm test
 npm run build

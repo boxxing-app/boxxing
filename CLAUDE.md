@@ -1,29 +1,26 @@
-# Boxxing · phone position finder
+# Hand tracker
 
-Mobile web app (Vite + TypeScript, MediaPipe Tasks Vision `PoseLandmarker` in a worker, Three.js). One screen to find the best phone position for shadow boxing: camera + 2D skeleton, 3D avatar copying the user, a Match % field and "Save this position". Later goal: a 3D avatar that copies moves live from one phone camera and shows mistakes. The user is orthodox and trains at ~45° to the phone (phone on their front-right diagonal).
+Mobile web app (Vite + TypeScript, MediaPipe Tasks Vision `HandLandmarker` in a worker, Three.js): live 3D hand tracking, fingers from the wrist up, from one phone camera held close (about 20–80 cm, bare hands). The goal is accurate tracking. It started as a shadow-boxing body tracker (repo name `boxxing`); the boxing niche and full-body tracking were dropped on purpose and the code deleted (still in git history before `57195e0`).
 
 ## Run, test, deploy
 
-- Node 22.12+. `npm ci`, `npm run assets` (models from storage.googleapis.com + WASM into `public/`, git-ignored), `npm run dev`, `npm test`, `npm run build`.
-- Browser check: `BASE_PATH=/boxxing/ npm run build && node scripts/check-ui.mjs [outDir]`. Uses the global Playwright and Chromium's fake camera; checks portrait/landscape `?demo=1`, no scrolling, no extras, no console errors, avatar moves, mirror, save/export, and the camera path.
-- Deploy: push to `main` → `.github/workflows/pages.yml` builds with `BASE_PATH=/<repo>/` and publishes `dist/` to https://boxxing-app.github.io/boxxing/ (Settings → Pages → Source: GitHub Actions).
+- Node 22.12+. `npm ci`, `npm run assets` (hand model from storage.googleapis.com + WASM into `public/`, git-ignored except `public/models/manifest.json`), `npm run dev`, `npm test`, `npm run build`.
+- Browser check: `BASE_PATH=/boxxing/ npm run build && node scripts/check-ui.mjs [outDir]`. Uses the global Playwright and Chromium's fake camera; checks portrait/landscape `?demo=1`, no scrolling, nothing extra, no console errors, 3D hands move, mirror, and that the camera path loads the model.
+- Deploy: push to `main` → `.github/workflows/pages.yml` builds with `BASE_PATH=/<repo>/` and publishes `dist/` to https://boxxing-app.github.io/boxxing/. The repo lives in the `boxxing-app` organization because the owner's personal `github.io` redirects to an unrelated custom domain.
 
 ## Files
 
-- `main.ts` the screen; `style.css`; `config.ts` URL parameters; `capture.ts` the saved record; `storage.ts` IndexedDB `boxxing-positions`.
-- `tracker.ts`, `pose.worker.ts`, `asset-loader.ts`, `camera-access.ts`, `wasm-bootstrap.ts`: camera + model loading (kept from the prototype; they work).
-- `rig.ts` avatar + solver; `viewer.ts` 3D scene; `motion.ts` floor, tilt, root position; `filter.ts` One Euro; `math.ts`; `demo.ts` synthetic poses for tests and `?demo=1`.
+- `main.ts` the screen; `style.css`; `config.ts` URL parameters; `hands.ts` geometry (focal length, pinhole position solve, fixed finger lengths, handedness); `viewer.ts` 3D scene; `demo.ts` synthetic hands for tests and `?demo=1`; `filter.ts` One Euro; `math.ts`.
+- `tracker.ts`, `hand.worker.ts`, `asset-loader.ts`, `camera-access.ts`, `wasm-bootstrap.ts`: camera + model loading (kept from the prototype; they work).
 
 ## Decisions (keep unless the user changes them)
 
-- Camera: default `1280x960` (4:3 = whole sensor; 16:9 crops it) with `resizeMode: none` so Chrome does not crop/scale, and zoom set to its minimum where exposed. The rear camera also prefers a lens labelled wide/0.5.
-- One screen only. Allowed extras: one quiet status line (loading, errors, FPS) and a tiny "Export (n)" link. No other UI. Settings only through URL parameters (`camera=rear`, `model`, `res`, `minCutoff`/`beta`/`dCutoff`, `debug=1`, `demo=1`).
-- Layout: landscape = camera left, 3D right; portrait = camera top, 3D below; both as large as possible (watched from 2–3 m). Camera image is letterboxed (`contain`); the 3D view uses the phone's vertical field of view and fills its pane.
+- One screen, two views, nothing else but one quiet status line (loading, errors, FPS, hand count). Landscape = camera left, 3D right; portrait = camera top, 3D below. Settings only through URL parameters (`camera=rear`, `res`, `fov`, `minCutoff`/`beta`/`dCutoff`, `debug=1`, `demo=1`).
+- Camera: default `1280x960` (4:3 = whole sensor; 16:9 crops it) with `resizeMode: none`, and zoom set to its minimum where exposed. The rear camera prefers a lens labelled wide/0.5.
 - Front camera: mirror the display only (CSS `scaleX(-1)` on both views); never flip data. Rear camera is not mirrored. Orbit drags are flipped when mirrored.
-- Save: Match % required → 10 one-per-second beeps (the only sound) → 5 s hold recorded → double beep → one IndexedDB record (time, Match %, body angle, phone pitch/roll, camera facing/label/resolution, model, median FPS, p95 inference, pose %, key-joint visibility, raw jitter in mm, the raw 2D + world landmarks). Tilt permission is requested on the first press where needed (iOS). Shows "Saved #n · body angle N°" for 3 s.
-- Body angle: torso facing vs the direction to the camera; positive = phone to the front-right. Corrected for being off the lens axis.
+- Handedness: MediaPipe labels hands as if the image were mirrored; frames are never mirrored, so `sideOf()` swaps the label. If both hands get the same label, the less certain one becomes the other side. Right = green, left = blue.
+- Position: each hand's origin is placed by an exact linear pinhole solve of its 3D world landmarks against its image points (`solveTranslation`), with f from `?fov` (default 70° across the long side). The 3D camera sits at the phone (origin, looking −z) with the camera image's field of view and shows exactly its frame (letterboxed like the image), so hands line up with the camera view. `fov` only scales depth.
+- Shape: fixed bone lengths per hand = median of the first 30 frames; each bone aimed exactly along its landmark direction, built out from the wrist (`HandShape`). Double-tap re-measures.
+- Smoothing: hand shape (metres, relative to the hand centre) minCutoff 1.5, beta 5, dCutoff 2, per hand; position has its own steadier filter (1, 2, 1). URL smoothing is stored under `hands.smoothing.v1`; older keys are deleted.
 - Privacy: no backend, no analytics, no uploads. The worker blocks external fetch/XHR; CSP `connect-src 'self'` lives in `index.html` (GitHub Pages ignores `public/_headers`). Every runtime URL uses Vite's `BASE_URL` (the site lives under `/boxxing/`).
-- Rig conventions: `V(p)=(x,-y,-z)`; MediaPipe's left is +x; limbs are aimed exactly along landmark directions (keep this solver). Pelvis from the hip line, chest (child of pelvis) from the shoulder line, neck aimed shoulder-mid → ear-mid, head from ears + nose. Rotations are solved relative to the mesh, so the parent group can move/level it.
-- Smoothing: separate world (metres; default minCutoff 1.5, beta 5, dCutoff 2) and image (0–1; beta 12) settings. URL values are stored under `boxxing.smoothing.world.v2`; old `motion-*` keys are deleted.
-- Root motion: MediaPipe world points are hip-centred. Height = lowest foot point (27–32) on the floor every frame (levelled by phone tilt if available). Floor position = pinhole from the torso scale vs a still start (nominal d0 = 3 m, f = s0·d0, Z = d0·s0/s, X = (u−cx)·Z/f), paraperspective-corrected, slower filter. Re-measured after Save, after a double-tap, and after 2 s with no pose.
-- Tests (`tests/`): bone directions within 1° at 0/45/90° with twist/duck/slip; feet within 2 cm of the floor in a duck; steps within 5 cm; head moves vs chest in a slip; 45 cm 150 ms jab ≥ 90% at 20 fps.
+- `V(p)=(x,-y,-z)` converts MediaPipe camera axes (x right, y down, z forward) to Three.js.

@@ -1,12 +1,14 @@
-import type {Point,Settings,Tilt} from './types';
+import type {Point,Settings} from './types';
 import {backoff,loadBudget,type LoadPhase} from './asset-loader';
 import {cameraContext,requestCamera} from './camera-access';
-export type TrackingSample={timestamp:number;landmarks:Point[];world:Point[];inferenceMs:number;mediaTime:number;presentedFrames:number|null;captureTime:number|null;pipelineStart:number};
+/** One detected hand. label is MediaPipe's handedness, which assumes a mirrored (selfie) image: see handOf() in hands.ts. */
+export type HandSample={landmarks:Point[];world:Point[];label:string;score:number};
+export type TrackingSample={timestamp:number;hands:HandSample[];inferenceMs:number;mediaTime:number;presentedFrames:number|null;captureTime:number|null;pipelineStart:number};
 export class Tracker{
  worker:Worker|null=null;stream:MediaStream|null=null;delegate='';running=false;busy=false;ready=false;request=0;lastTime=-1;cameraSettings:MediaTrackSettings|null=null;generation=0;
  private cancelLoading:(()=>void)|null=null;
  private cameraRequest:AbortController|null=null;
- private pending:Omit<TrackingSample,'landmarks'|'world'|'inferenceMs'>|null=null;
+ private pending:Omit<TrackingSample,'hands'|'inferenceMs'>|null=null;
  constructor(public video:HTMLVideoElement,private onSample:(s:TrackingSample)=>void,private onStatus:(s:string,error?:boolean,cameraHelp?:boolean)=>void){}
  async start(s:Settings){
   this.stop();const generation=this.generation,request=new AbortController();this.cameraRequest=request;this.onStatus('Requesting camera permission…');let cameraConnected=false;
@@ -33,7 +35,7 @@ export class Tracker{
    const clear=()=>{clearTimeout(timer);clearTimeout(retryTimer)};
    const fail=(error:Error)=>{if(settled)return;settled=true;clear();this.cancelLoading=null;this.worker?.terminate();this.worker=null;reject(error)};
    const retry=(reason:string)=>{
-    if(attempt>=2){fail(new Error(`${reason} Startup failed after 3 attempts. Retry with Lite or another browser.`));return}
+    if(attempt>=2){fail(new Error(`${reason} Startup failed after 3 attempts. Retry, or try another browser.`));return}
     clear();this.worker?.terminate();this.worker=null;
     const gpu=phase==='gpu';if(gpu)mode='CPU';const delay=backoff(1000,attempt++);
     this.onStatus(`${gpu?'GPU did not start. Switching to CPU.':reason} Retrying in ${delay/1000}s with a longer timeout (attempt ${attempt+1}/3)…`);
@@ -42,7 +44,7 @@ export class Tracker{
    const arm=(timeoutMs?:number)=>{clearTimeout(timer);timer=setTimeout(()=>retry(`${message}: no response.`),timeoutMs??loadBudget(phase,attempt))};
    const launch=()=>{
     if(settled)return;phase='download';message='Starting the tracking worker';arm();
-    let worker:Worker;try{worker=new Worker(new URL('./pose.worker.ts',import.meta.url),{type:'module'})}catch(e){fail(new Error(`Tracking worker could not start: ${String(e)}`));return}
+    let worker:Worker;try{worker=new Worker(new URL('./hand.worker.ts',import.meta.url),{type:'module'})}catch(e){fail(new Error(`Tracking worker could not start: ${String(e)}`));return}
     this.worker=worker;
     worker.onerror=e=>{if(this.worker!==worker)return;const text=e.message||'Tracking worker failed';if(settled){this.stop();this.onStatus(text,true)}else if(phase==='gpu')retry(text);else fail(new Error(text))};
     worker.onmessageerror=()=>{if(this.worker!==worker)return;const text='The browser could not read a tracking-worker message.';if(settled){this.stop();this.onStatus(text,true)}else fail(new Error(text))};
@@ -76,5 +78,3 @@ export class Tracker{
 }
 /** Zoom all the way out where the browser exposes camera zoom (it may not; then this does nothing). */
 async function widest(stream:MediaStream){try{const track=stream.getVideoTracks()[0],zoom=(track.getCapabilities?.() as {zoom?:{min:number}}|undefined)?.zoom,current=(track.getSettings() as {zoom?:number}).zoom;if(zoom&&current!==undefined&&zoom.min<current)await track.applyConstraints({advanced:[{zoom:zoom.min} as MediaTrackConstraintSet]})}catch{}}
-export let tilt:Tilt|null=null;
-export async function enableTilt(){type OrientationConstructor=typeof DeviceOrientationEvent&{requestPermission?:()=>Promise<string>};const C=globalThis.DeviceOrientationEvent as OrientationConstructor|undefined;if(!C)return false;if(C.requestPermission&&await C.requestPermission()!=='granted')return false;window.addEventListener('deviceorientation',e=>{tilt={alpha:e.alpha,beta:e.beta,gamma:e.gamma,screenAngle:screen.orientation?.angle??0,at:performance.now()}});return true}

@@ -3,7 +3,8 @@ import {parseConfig} from './config';
 import {Tracker,type TrackingSample} from './tracker';
 import {Euro,PoseFilter} from './filter';
 import {COLORS,V,Viewer} from './viewer';
-import {HandShape,assignSides,focal,solveTranslation,type Side} from './hands';
+import {HandShape,PALM,focal,solveTranslation,trackSides,type Seen,type Side} from './hands';
+import {Tilt,cameraUp,levelQuaternion,phoneAngles,screenAngle} from './sensors';
 import {demoHands,DEMO_CAMERA} from './demo';
 import {DEFAULT_SETTINGS,LINKS,POSITION_FILTER,type Facing,type Point} from './types';
 import {add,quantile} from './math';
@@ -23,7 +24,10 @@ const shapes:Record<Side,HandShape>={left:new HandShape(),right:new HandShape()}
 const position:Record<Side,Euro[]>={left:[new Euro(),new Euro(),new Euro()],right:[new Euro(),new Euro(),new Euro()]};
 if(viewer)viewer.onDoubleTap=()=>{for(const s of sides)shapes[s].reset()};// measure finger lengths again
 let tracker:Tracker|null=null,facing:Facing=cfg.facing,statusText=viewer?'Starting…':'The 3D view needs WebGL, which this browser does not provide.',statusError=!viewer;
-let last:TrackingSample|null=null;
+let current:{side:Side;distance:number;score:number}[]=[];const seen:Partial<Record<Side,Seen>>={};
+// Phone tilt levels the 3D view. Android gives it without asking; iOS asks on the first tap.
+const tilt=new Tilt();tilt.start();
+if(tilt.needsPermission)document.addEventListener('pointerdown',()=>void tilt.requestPermission().catch(()=>{}),{once:true});
 const times:number[]=[],inference:number[]=[];
 
 function setStatus(text:string,error=false){statusText=text;statusError=error;renderStatus()}
@@ -31,9 +35,12 @@ const live=()=>cfg.demo||!!tracker?.running;
 function renderStatus(){
  let text=statusText,error=statusError;
  if(live()&&!error){
-  const gaps=times.slice(1).map((t,i)=>t-times[i]),fps=gaps.length?1000/quantile(gaps,.5)!:0,hands=last?assignSides(last.hands):[];
-  text=`hand · ${cfg.demo?'demo':tracker?.delegate} · ${fps.toFixed(0)} fps · ${hands.length?`${hands.length} hand${hands.length>1?'s':''}`:'no hands in view'}`;
-  if(cfg.debug)text+=` · ${cfg.demo?'1280×960':`${video.videoWidth}×${video.videoHeight}`} · inference ${(quantile(inference,.5)??0).toFixed(0)} ms${hands.map(h=>` · ${h.side[0].toUpperCase()} ${h.hand.score.toFixed(2)}`).join('')}${sides.some(s=>!shapes[s].calibrated)?' · measuring':''}`;
+  const gaps=times.slice(1).map((t,i)=>t-times[i]),fps=gaps.length?1000/quantile(gaps,.5)!:0;
+  // Distance from the phone to each hand's centre: R first, then L.
+  const hands=[...current].sort((a,b)=>a.side<b.side?1:-1);
+  text=`hand · ${cfg.demo?'demo':tracker?.delegate} · ${fps.toFixed(0)} fps · ${hands.length?hands.map(h=>`${h.side[0].toUpperCase()} ${Math.round(h.distance*100)} cm`).join(' · '):'no hands in view'}`;
+  if(cfg.debug){const up=cameraUp(tilt.up,screenAngle(),facing),angles=up&&phoneAngles(up);
+   text+=` · ${cfg.demo?'1280×960':`${video.videoWidth}×${video.videoHeight}`} · inference ${(quantile(inference,.5)??0).toFixed(0)} ms${hands.map(h=>` · ${h.side[0].toUpperCase()} ${h.score.toFixed(2)}`).join('')} · ${angles?`pitch ${angles.pitchDeg.toFixed(0)}° roll ${angles.rollDeg.toFixed(0)}° (${tilt.source})`:'no tilt'}${sides.some(s=>!shapes[s].calibrated)?' · measuring':''}`}
  }
  statusLine.textContent=text;statusLine.classList.toggle('error',error);
 }
@@ -44,16 +51,19 @@ const aspect=()=>cfg.demo?DEMO_CAMERA.aspect:(video.videoWidth||4)/(video.videoH
 
 function onSample(s:TrackingSample){
  const t=s.timestamp;times.push(t);inference.push(s.inferenceMs);if(times.length>30){times.shift();inference.shift()}
- last=s;const a=aspect(),f=focal(cfg.fov,a),hands=assignSides(s.hands);viewer?.setCamera(f,a);
+ const a=aspect(),f=focal(cfg.fov,a),hands=trackSides(s.hands,seen,t);current=[];
+ viewer?.setCamera(f,a);viewer?.setLevel(levelQuaternion(cameraUp(tilt.up,screenAngle(),facing)));
  draw2d(hands.map(h=>({side:h.side,points:h.hand.landmarks})));
- for(const side of sides){
-  const found=hands.find(h=>h.side===side);if(!found){viewer?.update(side,null);continue}
-  const {world,landmarks}=found.hand,T0=solveTranslation(world,landmarks,f,a);if(!T0){viewer?.update(side,null);continue}
+ for(const {side,hand} of hands){
+  const {world,landmarks}=hand;seen[side]={x:landmarks[0].x,y:landmarks[0].y,t};
+  // Position from the palm only: its points are steadier than the fingertips, so depth jitters less.
+  const T0=solveTranslation(world,landmarks,f,a,PALM);if(!T0)continue;
   // Shape and position are smoothed separately: depth from image size is noisier than the hand's shape.
   const [ex,ey,ez]=position[side],at={x:ex.step(T0.x,t,POSITION_FILTER),y:ey.step(T0.y,t,POSITION_FILTER),z:ez.step(T0.z,t,POSITION_FILTER)};
+  current.push({side,distance:Math.hypot(at.x,at.y,at.z),score:hand.score});
   shapes[side].calibrate(world);
   const joints=shapes[side].solve(filter.apply(world,t,cfg.world,side));
-  viewer?.update(side,joints.map(p=>V(add(p,at))),cfg.debug?world.map(p=>V(add(p,T0))):null);
+  viewer?.update(side,t,joints.map(p=>V(add(p,at))),cfg.debug?world.map(p=>V(add(p,T0))):null);
  }
 }
 

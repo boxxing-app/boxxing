@@ -1,9 +1,11 @@
 import {describe,expect,it} from 'vitest';
 import * as T from 'three';
-import {HandShape,assignSides,focal,sideOf,solveTranslation} from '../src/hands';
+import {HandShape,PALM,assignSides,focal,sideOf,solveTranslation,trackSides} from '../src/hands';
+import {cameraUp,levelQuaternion,phoneAngles} from '../src/sensors';
+import {Euro,PoseFilter} from '../src/filter';
 import {DEMO_CAMERA,demoHand,demoHands,mirror,project} from '../src/demo';
-import {V} from '../src/viewer';
-import {BONES,type Point} from '../src/types';
+import {V,sampleAt,type Frame} from '../src/viewer';
+import {BONES,WORLD_FILTER,type Point} from '../src/types';
 import {add,dist,mul,sub,unit} from '../src/math';
 import type {HandSample} from '../src/tracker';
 
@@ -54,4 +56,44 @@ describe('left and right',()=>{
  });
  it('the demo\'s right hand appears on the image\'s left, as when facing the camera',()=>{const [right,left]=demoHands(0);expect(right.landmarks[0].x).toBeLessThan(.5);expect(left.landmarks[0].x).toBeGreaterThan(.5)});
  it('a fist folds the fingertips toward the palm',()=>{const open=demoHand(0),fist=demoHand(1);for(const tip of [8,12,16,20])expect(dist(fist[tip],fist[0])).toBeLessThan(dist(open[tip],open[0])*.75)});
+});
+
+describe('steadier tracking',()=>{
+ it('solves the position from the palm alone',()=>{for(const [,hand] of poses)for(const at of places){const found=solveTranslation(hand,project(hand,at,DEMO_CAMERA),DEMO_CAMERA.f,DEMO_CAMERA.aspect,PALM)!;expect(dist(found,at)).toBeLessThan(1e-6)}});
+ it('with fingertip noise, the palm solve keeps depth steadier than using every point',()=>{
+  const hand=demoHand(.3,10,0),at={x:0,y:0,z:.45};let all=0,palm=0;
+  for(let k=0;k<50;k++){const image=project(hand,at,DEMO_CAMERA).map((p,i)=>[4,8,12,16,20,3,7,11,15,19].includes(i)?{...p,x:p.x+.004*Math.sin(k*1.7+i),y:p.y+.004*Math.cos(k*2.3+i)}:p);
+   all+=Math.abs(solveTranslation(hand,image,DEMO_CAMERA.f,DEMO_CAMERA.aspect)!.z-at.z);palm+=Math.abs(solveTranslation(hand,image,DEMO_CAMERA.f,DEMO_CAMERA.aspect,PALM)!.z-at.z)}
+  expect(palm).toBeLessThan(all/10);
+ });
+ const hand=(label:string,x:number,score=.9):HandSample=>{const world=demoHand();return{label,score,world,landmarks:world.map((p,i)=>({...p,x:x+(i?.01:0),y:.5}))}};
+ it('keeps each hand on its side when MediaPipe flips the labels for a frame',()=>{
+  const seen={left:{x:.7,y:.5,t:1000},right:{x:.3,y:.5,t:1000}};
+  const flipped=trackSides([hand('Left',.71),hand('Right',.31)],seen,1033);// labels say right=.71, left=.31: swapped
+  expect(flipped.map(h=>[h.side,h.hand.landmarks[0].x])).toEqual([['left',.71],['right',.31]]);
+  expect(trackSides([hand('Left',.69)],seen,1033).map(h=>h.side)).toEqual(['left']);// one hand, near where the left was
+  expect(trackSides([hand('Left',.69)],seen,2000).map(h=>h.side)).toEqual(['right']);// long gone: the label decides again
+ });
+ it('blends between tracker results for display, and holds the newest',()=>{
+  const frame=(t:number,x:number):Frame=>({t,joints:[new T.Vector3(x,0,0)]}),out=[new T.Vector3()],frames=[frame(0,0),frame(40,4),frame(80,8)];
+  expect(sampleAt(frames,20,out)[0].x).toBeCloseTo(2);expect(sampleAt(frames,60,out)[0].x).toBeCloseTo(6);
+  expect(sampleAt(frames,200,out)[0].x).toBe(8);expect(sampleAt(frames,-5,out)[0].x).toBe(0);expect(sampleAt([frame(5,3)],0,out)[0].x).toBe(3);
+ });
+ it('the per-hand filter bank gives the same result as one filter per coordinate',()=>{
+  const bank=new PoseFilter(),single=[new Euro(),new Euro(),new Euro()];
+  for(let k=0;k<20;k++){const p={x:Math.sin(k),y:Math.cos(k*.7),z:k*.01},out=bank.apply([p],k*33,WORLD_FILTER,'right')[0];
+   expect([out.x,out.y,out.z]).toEqual([single[0].step(p.x,k*33,WORLD_FILTER),single[1].step(p.y,k*33,WORLD_FILTER),single[2].step(p.z,k*33,WORLD_FILTER)])}
+ });
+});
+
+describe('phone tilt',()=>{
+ const up=(beta:number,gamma:number)=>new T.Vector3(-Math.cos(beta*Math.PI/180)*Math.sin(gamma*Math.PI/180),Math.sin(beta*Math.PI/180),Math.cos(beta*Math.PI/180)*Math.cos(gamma*Math.PI/180));
+ it('turns the gravity direction into the camera\'s pitch and roll',()=>{
+  expect(phoneAngles(cameraUp(up(90,0),0,'user')!).pitchDeg).toBeCloseTo(0);// upright portrait: level
+  expect(phoneAngles(cameraUp(up(70,0),0,'environment')!).pitchDeg).toBeCloseTo(-20);// tipped back: the rear lens points down
+  expect(phoneAngles(cameraUp(up(70,0),0,'user')!).pitchDeg).toBeCloseTo(20);// …and the front lens up
+  const landscape=phoneAngles(cameraUp(up(0,-90),90,'environment')!);expect(landscape.pitchDeg).toBeCloseTo(0);expect(landscape.rollDeg).toBeCloseTo(0);
+  expect(cameraUp(null,0,'user')).toBeNull();
+ });
+ it('levels the scene: gravity in the camera frame becomes straight down',()=>{const u=cameraUp(up(65,12),0,'user')!;expect(u.clone().applyQuaternion(levelQuaternion(u)).angleTo(new T.Vector3(0,1,0))).toBeCloseTo(0,6);expect(levelQuaternion(null).equals(new T.Quaternion())).toBe(true)});
 });

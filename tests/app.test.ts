@@ -15,6 +15,6 @@ describe('URL settings',()=>{
   const store=memory({'boxxing.smoothing.world.v2':JSON.stringify({minCutoff:9,beta:9,dCutoff:9}),'motion-settings':'{}'});
   expect(parseConfig('',store).world).toEqual(WORLD_FILTER);expect(store.m.size).toBe(0);
   expect(parseConfig('?beta=3',store).world).toEqual({...WORLD_FILTER,beta:3});expect(JSON.parse(store.m.get(SMOOTHING_KEY)!).beta).toBe(3);
-  expect(parseConfig('',store).world.beta).toBe(3);expect(parseConfig('?minCutoff=1.5&beta=5&dCutoff=2',store).world).toEqual(WORLD_FILTER);
+  expect(parseConfig('',store).world.beta).toBe(3);expect(parseConfig('?minCutoff=1&beta=5&dCutoff=2',store).world).toEqual(WORLD_FILTER);
  });
 });

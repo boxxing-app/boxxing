@@ -12,6 +12,6 @@ export const BONES:[number,number][]=FINGERS.flatMap(f=>[[0,f[0]] as [number,num
 export const LINKS:[number,number][]=[...BONES,[5,9],[9,13],[13,17]];
 export const DEFAULT_SETTINGS:Settings={model:'hand',resolution:'1280x960',facing:'user',deviceId:'',orientation:'landscape'};
 /** Joint shapes, in metres relative to the hand centre. */
-export const WORLD_FILTER:FilterSettings={minCutoff:1.5,beta:5,dCutoff:2};
+export const WORLD_FILTER:FilterSettings={minCutoff:1,beta:5,dCutoff:2};
 /** Hand position in the camera frame, in metres. Steadier, because depth from image size is noisier than the shape. */
 export const POSITION_FILTER:FilterSettings={minCutoff:1,beta:2,dCutoff:1};

@@ -8,7 +8,7 @@ export const SMOOTHING_KEY='hands.smoothing.v1';
 const OLD_KEYS=['motion-settings','motion-weights','boxxing.smoothing.world.v2'];
 type Store=Pick<Storage,'getItem'|'setItem'|'removeItem'>;
 /** Settings come only from the URL: ?camera=rear ?res=WxH ?fov=degrees ?minCutoff= &beta= &dCutoff= ?debug=1 ?demo=1.
- * Smoothing values given in the URL are remembered on this device; give the defaults (1.5, 5, 2) to go back. */
+ * Smoothing values given in the URL are remembered on this device; give the defaults (1, 5, 2) to go back. */
 export function parseConfig(search:string,store:Store|null=null):Config{
  const q=new URLSearchParams(search),flag=(k:string)=>['1','true','yes','on'].includes((q.get(k)??'').toLowerCase());
  const res=q.get('res'),fov=Number(q.get('fov'));

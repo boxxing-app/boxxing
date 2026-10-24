@@ -1,6 +1,6 @@
 # Hand tracker
 
-Mobile web app (Vite + TypeScript, MediaPipe Tasks Vision `HandLandmarker` in a worker, Three.js): live 3D hand tracking, fingers from the wrist up, from one phone camera held close (about 20–80 cm, bare hands). The goal is accurate tracking. It started as a shadow-boxing body tracker (repo name `boxxing`); the boxing niche and full-body tracking were dropped on purpose and the code deleted (still in git history before `57195e0`).
+Mobile web app (Vite + TypeScript, MediaPipe Tasks Vision `HandLandmarker` in a worker, Three.js): live 3D hand tracking, fingers from the wrist up, from one phone camera held close (about 20–80 cm, bare hands), with rigged 3D hands and a box to push and pinch-grab. The goals are accurate tracking and speed. It started as a shadow-boxing body tracker (repo name `boxxing`); the boxing niche and full-body tracking were dropped on purpose and the code deleted (still in git history before `57195e0`).
 
 ## Run, test, deploy
 
@@ -10,14 +10,17 @@ Mobile web app (Vite + TypeScript, MediaPipe Tasks Vision `HandLandmarker` in a 
 
 ## Files
 
-- `main.ts` the screen; `style.css`; `config.ts` URL parameters; `hands.ts` geometry (focal length, pinhole position solve, fixed finger lengths, handedness); `viewer.ts` 3D scene; `demo.ts` synthetic hands for tests and `?demo=1`; `filter.ts` One Euro; `math.ts`.
-- `tracker.ts`, `hand.worker.ts`, `asset-loader.ts`, `camera-access.ts`, `wasm-bootstrap.ts`: camera + model loading (kept from the prototype; they work).
+- `main.ts` the screen; `style.css`; `config.ts` URL parameters; `hands.ts` geometry (focal length, pinhole position solve, fixed finger lengths, handedness); `viewer.ts` 3D scene; `handmodel.ts` rigged hand posed from landmarks; `physics.ts` box, table, push and pinch-grab; `sensors.ts` phone tilt; `public/hands/*.glb` WebXR generic hands (MIT); `demo.ts` synthetic hands for tests and `?demo=1`; `filter.ts` One Euro; `math.ts`.
+- `tracker.ts`, `hand.worker.ts`, `asset-loader.ts`, `camera-access.ts`, `wasm-bootstrap.ts`: camera + model loading. Where Chrome has `MediaStreamTrackProcessor`, the camera track's frames stream straight into the worker (newest frame only, no copy on the page thread); if the first frame's size or rotation differs from the `<video>`, it falls back to `createImageBitmap` per frame. MediaPipe timestamps use the worker's clock on both paths.
 
 ## Decisions (keep unless the user changes them)
 
-- One screen, two views, nothing else but one quiet status line (loading, errors, FPS, each hand's distance in cm). Landscape = camera left, 3D right; portrait = camera top, 3D below. Settings only through URL parameters (`camera=rear`, `res`, `fov`, `minCutoff`/`beta`/`dCutoff`, `debug=1`, `demo=1`).
+- One screen, two views, nothing else but one quiet status line (loading, errors, FPS, each hand's distance in cm). The 3D camera is fixed at the phone (no orbit); double-tap re-places the table and box and re-measures the fingers. Landscape = camera left, 3D right; portrait = camera top, 3D below. Settings only through URL parameters (`camera=rear`, `res`, `fov`, `minCutoff`/`beta`/`dCutoff`, `debug=1`, `demo=1`).
 - Camera: default `1280x960` (4:3 = whole sensor; 16:9 crops it) with `resizeMode: none`, and zoom set to its minimum where exposed. The rear camera prefers a lens labelled wide/0.5.
-- Front camera: mirror the display only (CSS `scaleX(-1)` on both views); never flip data. Rear camera is not mirrored. Orbit drags are flipped when mirrored.
+- Front camera: mirror the display only (CSS `scaleX(-1)` on both views); never flip data. Rear camera is not mirrored.
+- Hands: the WebXR generic hand (25 joints, all direct children of the armature) is posed by setting each joint on its landmark (finger metacarpals: rigid offset from the wrist), turning it with the palm frame (wrist, index/middle/pinky knuckles) and aiming it exactly at the next joint; bones scale with hand size. Lambert materials. An instanced skeleton shows until the models load.
+- Box: 6 cm cube on a 60×56 cm table placed level, 45 cm out along the view and low in the picture. Hands are kinematic spheres (joints + bone midpoints, 1.1 cm); pinch = thumb–index tips < 2.5 cm (release > 4 cm) within 3 cm of the box; release throws with the hand's speed; it settles flat; off the table it respawns. Physics runs in the 60 Hz draw loop on the blended hand poses.
+- Speed: no MSAA, Lambert materials, render only when something changed, pixel ratio adapts between 0.75 and 1.5 to keep frames under ~22 ms.
 - Handedness: MediaPipe labels hands as if the image were mirrored; frames are never mirrored, so `sideOf()` swaps the label. If both hands get the same label, the less certain one becomes the other side. Right = green, left = blue.
 - Position: each hand's origin is placed by an exact linear pinhole solve of its 3D world landmarks against its image points (`solveTranslation`), with f from `?fov` (default 70° across the long side). The 3D camera sits at the phone (origin, looking −z) with the camera image's field of view and shows exactly its frame (letterboxed like the image), so hands line up with the camera view. `fov` only scales depth.
 - Shape: fixed bone lengths per hand = median of the first 30 frames; each bone aimed exactly along its landmark direction, built out from the wrist (`HandShape`). Double-tap re-measures.

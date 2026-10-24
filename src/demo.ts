@@ -28,7 +28,7 @@ export type Pinhole={f:number;aspect:number};
 export const project=(world:Point[],T:Point,cam:Pinhole):Point[]=>world.map(p=>{const z=T.z+p.z;return{x:.5+cam.f*(T.x+p.x)/z/cam.aspect,y:.5+cam.f*(T.y+p.y)/z,z:p.z,visibility:p.visibility,presence:p.presence}});
 /** 4:3 frame with a 70° field of view across the long side. */
 export const DEMO_CAMERA:Pinhole={f:(4/3)/2/Math.tan(35*Math.PI/180),aspect:4/3};
-/** Two hands for ?demo=1, about 45 cm away: opening and closing, turning, moving in depth, and sweeping across the table. Labels follow MediaPipe's mirrored convention. */
+/** Two hands for ?demo=1, about 45 cm away: opening and closing, turning, moving in depth, and sweeping across the table. Labelled like MediaPipe labels real hands. */
 export function demoHands(t:number):HandSample[]{
  const wave=(period:number,phase=0)=>(1-Math.cos(2*Math.PI*(t/period+phase)))/2;
  const right=demoHand(wave(3),-30+40*wave(5),10*Math.sin(t)),left=mirror(demoHand(wave(3,.5),-30+40*wave(5,.3),-10*Math.sin(t*1.3)));
@@ -36,5 +36,5 @@ export function demoHands(t:number):HandSample[]{
  const hand=(world:Point[],T:Point,label:string):HandSample=>({world,landmarks:project(world,T,DEMO_CAMERA),label,score:.97});
  // Every 8 s the right hand dips to the table and sweeps across it (into the box).
  const dip=wave(8);
- return[hand(right,{x:-.11+.17*dip,y:.02+.1*dip,z:.44},'Left'),hand(left,{x:.11,y:.02+.03*Math.sin(t*.8),z:.45},'Right')];
+ return[hand(right,{x:-.11+.17*dip,y:.02+.1*dip,z:.44},'Right'),hand(left,{x:.11,y:.02+.03*Math.sin(t*.8),z:.45},'Left')];
 }

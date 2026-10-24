@@ -14,4 +14,4 @@ export const DEFAULT_SETTINGS:Settings={model:'hand',resolution:'1280x960',facin
 /** Joint shapes, in metres relative to the hand centre. */
 export const WORLD_FILTER:FilterSettings={minCutoff:1,beta:5,dCutoff:2};
 /** Hand position in the camera frame, in metres. Steadier, because depth from image size is noisier than the shape. */
-export const POSITION_FILTER:FilterSettings={minCutoff:1,beta:2,dCutoff:1};
+export const POSITION_FILTER:FilterSettings={minCutoff:1.5,beta:6,dCutoff:1};

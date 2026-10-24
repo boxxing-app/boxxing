@@ -2,7 +2,7 @@
 import {describe,expect,it} from 'vitest';
 import fs from 'node:fs';
 import * as T from 'three';
-import {BOX_HALF,BoxWorld,TABLE,TABLE_BELOW_CAMERA,TABLE_BELOW_HANDS,palmQuaternion,tablePose,type HandInput} from '../src/physics';
+import {BOX_HALF,BOX_SPAWN,BoxWorld,TABLE,TABLE_BELOW_CAMERA,TABLE_BELOW_HANDS,palmQuaternion,tablePose,type HandInput} from '../src/physics';
 import {HandModel} from '../src/handmodel';
 import {demoHand,mirror} from '../src/demo';
 import {V} from '../src/viewer';
@@ -19,8 +19,8 @@ describe('box on the table',()=>{
  it('a finger moving into its side pushes it along, without passing through',()=>{
   const w=new BoxWorld();run(w,.2);
   // A pointing hand sweeps along +x at 0.5 m/s through where the box is.
-  run(w,.6,t=>{const tip=new T.Vector3(-.12+.5*t,BOX_HALF,0),p=hand(new T.Vector3(0,.5,0));for(let k=0;k<4;k++)p[8-k].copy(tip).add(new T.Vector3(-.025*k,0,0));return[{side:'right',joints:p}]});// one straight index finger along x; the rest of the hand far above
-  expect(w.pos.x).toBeGreaterThan(.1);expect(Math.abs(w.pos.z)).toBeLessThan(.005);expect(w.pos.x-BOX_HALF).toBeGreaterThan(-.12+.5*.6-.002);// ahead of the fingertip
+  run(w,.6,t=>{const tip=new T.Vector3(-.12+.5*t,BOX_HALF,BOX_SPAWN.z),p=hand(new T.Vector3(0,.5,0));for(let k=0;k<4;k++)p[8-k].copy(tip).add(new T.Vector3(-.025*k,0,0));return[{side:'right',joints:p}]});// one straight index finger along x; the rest of the hand far above
+  expect(w.pos.x).toBeGreaterThan(.1);expect(Math.abs(w.pos.z-BOX_SPAWN.z)).toBeLessThan(.005);expect(w.pos.x-BOX_HALF).toBeGreaterThan(-.12+.5*.6-.002);// ahead of the fingertip
   run(w,2);expect(w.moving).toBe(false);expect(w.pos.y).toBeCloseTo(BOX_HALF,3);
  });
  it('pinching at the box picks it up; it moves with the hand and drops when let go',()=>{
@@ -36,7 +36,7 @@ describe('box on the table',()=>{
  });
  it('a pinch away from the box does not grab it, and a box that falls off the table comes back',()=>{
   const w=new BoxWorld();run(w,.2,()=>[{side:'left',joints:pinch(new T.Vector3(.2,.1,0))}]);expect(w.grabbed).toBeNull();
-  w.pos.set(TABLE.halfX+.1,.2,0);run(w,1.5);expect(w.pos.x).toBe(0);expect(w.pos.y).toBeCloseTo(BOX_HALF,3);
+  w.pos.set(TABLE.halfX+.1,.2,0);run(w,1.5);expect(w.pos.x).toBe(0);expect(w.pos.z).toBe(BOX_SPAWN.z);expect(w.pos.y).toBeCloseTo(BOX_HALF,3);
  });
  it('the table goes under your palms, below the camera, facing the camera, even when the phone looks up',()=>{
   const palms=[new T.Vector3(-.1,-.05,-.4),new T.Vector3(.1,-.03,-.44)],level=new T.Vector3(0,0,-1);

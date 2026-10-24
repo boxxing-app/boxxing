@@ -3,6 +3,8 @@ import {BONES} from './types';
 import type {Side} from './hands';
 /** Half the box's edge (a 6 cm cube). */
 export const BOX_HALF=.03;
+/** Where a fresh box appears on the table: 12 cm from the table's centre toward the phone (+z), so not right under your palm. */
+export const BOX_SPAWN=new T.Vector3(0,BOX_HALF,.12);
 /** The table's top is the plane y = 0 of the physics frame; the box lives inside these x/z bounds and falls off outside them. */
 export const TABLE={halfX:.3,halfZ:.28};
 const G=9.81,PINCH_ON=.025,PINCH_OFF=.04,GRAB_REACH=.03,FINGER_R=.011,FRICTION=5,MAX_SPEED=3;
@@ -27,7 +29,7 @@ export class BoxWorld{
  private pinching:Record<Side,boolean>={left:false,right:false};private previous:Partial<Record<Side,T.Vector3[]>>={};
  private holdPos=new T.Vector3();private holdQuat=new T.Quaternion();private gripVel=new T.Vector3();private lastGrip:T.Vector3|null=null;
  constructor(){this.reset()}
- reset(){this.pos.set(0,BOX_HALF,0);this.vel.set(0,0,0);this.quat.identity();this.spin=0;this.grabbed=null;this.lastGrip=null}
+ reset(){this.pos.copy(BOX_SPAWN);this.vel.set(0,0,0);this.quat.identity();this.spin=0;this.grabbed=null;this.lastGrip=null}
  get moving(){return this.grabbed!==null||this.vel.lengthSq()>1e-8||Math.abs(this.spin)>1e-3||!this.onTable}
  /** Distance from a point to the box's surface (0 inside). */
  distanceTo(p:T.Vector3){const l=p.clone().sub(this.pos).applyQuaternion(this.quat.clone().invert());return new T.Vector3(Math.max(0,Math.abs(l.x)-BOX_HALF),Math.max(0,Math.abs(l.y)-BOX_HALF),Math.max(0,Math.abs(l.z)-BOX_HALF)).length()}

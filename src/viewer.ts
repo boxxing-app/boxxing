@@ -46,8 +46,10 @@ class HandView{
   this.group.visible=true;return true;
  }
 }
-/** Where the fixed view looks (level frame, phone at the origin): about where your hands are, a little below the phone. */
+/** Where the view looks before the table is placed (level frame, phone at the origin): about where hands usually are. */
 const VIEW_TARGET=new T.Vector3(0,-.1,-.45);
+/** Once the table is placed, the view centres on this point above the table's centre. */
+const VIEW_ABOVE_TABLE=.06;
 /** Half the height of the view, in metres. */
 const VIEW_HALF=.3;
 /** The 3D view: a fixed isometric view (orthographic, 35° down, 45° to the side) from above and behind you, as if looking down at
@@ -58,7 +60,7 @@ export class Viewer{
  renderer:T.WebGLRenderer;scene=new T.Scene();camera=new T.OrthographicCamera(-VIEW_HALF,VIEW_HALF,VIEW_HALF,-VIEW_HALF,.01,5);world=new T.Group();
  hands:Record<Side,HandView>={left:new HandView(COLORS.left),right:new HandView(COLORS.right)};
  box=new BoxWorld();table=new T.Group();private boxMesh:T.Mesh;private shadow:T.Mesh;private boxMaterial:T.MeshLambertMaterial;
- onDoubleTap=()=>{};private handShadows:Record<Side,T.Mesh>;pixelRatio:number;private maxPixelRatio:number;
+ onDoubleTap=()=>{};private handShadows:Record<Side,T.Mesh>;private viewTarget=VIEW_TARGET.clone();private viewSide=-1;pixelRatio:number;private maxPixelRatio:number;
  private level=new T.Quaternion();private levelTarget=new T.Quaternion();private levelKnown=false;
  /** Smoothed tracker delay (result arrival − capture) and frame interval, in ms: the view runs this far behind to blend between results. */
  private lag=30;private interval=40;private lastT=0;
@@ -96,12 +98,15 @@ export class Viewer{
  setLevel(level:T.Quaternion|null){if(!level)return;this.levelTarget.copy(level);if(!this.levelKnown){this.levelKnown=true;this.level.copy(level);this.reset()}}
  /** Look from your side of the phone: behind your hands for the front camera (you face the screen), behind the phone for the rear one. */
  setFacing(facing:'user'|'environment'){
-  const side=facing==='user'?-1:1;// your side along z, and your right along x: in the front camera's frame your right is -x
-  this.camera.position.copy(VIEW_TARGET).add(new T.Vector3(side,1,side).normalize());this.camera.up.set(0,1,0);this.camera.lookAt(VIEW_TARGET);this.dirty=true;
+  this.viewSide=facing==='user'?-1:1;// your side along z, and your right along x: in the front camera's frame your right is -x
+  this.aim();
  }
+ private aim(){const side=this.viewSide;this.camera.position.copy(this.viewTarget).add(new T.Vector3(side,1,side).normalize());this.camera.up.set(0,1,0);this.camera.lookAt(this.viewTarget);this.dirty=true}
  /** Take the table away until your hands are in view again, then place it under them with a fresh box. */
  reset(){this.placed=false;this.handsSince=0;this.box.reset();this.dirty=true}
- private placeUnder(palms:T.Vector3[],placed=true){const pose=tablePose(palms,new T.Vector3(0,0,-1).applyQuaternion(this.levelTarget));this.table.position.copy(pose.position);this.table.quaternion.copy(pose.quaternion);this.placed=placed;this.box.reset();this.dirty=true}
+ private placeUnder(palms:T.Vector3[],placed=true){const pose=tablePose(palms,new T.Vector3(0,0,-1).applyQuaternion(this.levelTarget));this.table.position.copy(pose.position);this.table.quaternion.copy(pose.quaternion);this.placed=placed;this.box.reset();
+  // Centre the view on the table, so the table, the box and your hands sit in the middle.
+  this.viewTarget.copy(pose.position).add(new T.Vector3(0,VIEW_ABOVE_TABLE,0));this.aim()}
  fit(){const w=this.host.clientWidth,h=Math.max(1,this.host.clientHeight),a=w/h,half=Math.max(VIEW_HALF,VIEW_HALF/a);this.renderer.setSize(w,h);
   this.camera.left=-half*a;this.camera.right=half*a;this.camera.top=half;this.camera.bottom=-half;this.camera.updateProjectionMatrix();this.dirty=true}
  /** Lower the resolution when frames take too long, raise it again when there is room. */

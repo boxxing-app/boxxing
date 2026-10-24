@@ -44,14 +44,20 @@ describe('fixed finger lengths',()=>{
   BONES.forEach(([a,b],i)=>expect(Math.abs(shape.lengths![i]-dist(hand[a],hand[b]))/dist(hand[a],hand[b])).toBeLessThan(.02));
   shape.reset();expect(shape.calibrated).toBe(false);
  });
+ it('a bad start does not fix a bad shape for good: the lengths follow the last 2 s',()=>{
+  const shape=new HandShape(),hand=demoHand(.2),stretched=hand.map(p=>({...p,x:p.x*1.4,y:p.y*1.4,z:p.z*1.4}));// the hand entering the picture, badly sized
+  for(let k=0;k<30;k++)shape.calibrate(stretched);expect(shape.lengths![0]).toBeCloseTo(dist(stretched[0],stretched[1]),9);
+  for(let k=0;k<60;k++)shape.calibrate(hand);
+  BONES.forEach(([a,b],i)=>expect(shape.lengths![i]).toBeCloseTo(dist(hand[a],hand[b]),9));
+ });
 });
 
 describe('left and right',()=>{
  const sample=(label:string,score=.9,n=21):HandSample=>({label,score,landmarks:demoHand().slice(0,n),world:demoHand().slice(0,n)});
- it('swaps MediaPipe\'s mirrored labels, since frames are never mirrored',()=>{expect(sideOf('Left')).toBe('right');expect(sideOf('Right')).toBe('left');expect(sideOf('')).toBeNull()});
+ it('uses MediaPipe\'s labels as they are (frames are never mirrored)',()=>{expect(sideOf('Left')).toBe('left');expect(sideOf('Right')).toBe('right');expect(sideOf('')).toBeNull()});
  it('gives each side one hand and skips incomplete ones',()=>{
-  expect(assignSides([sample('Left',.6),sample('Left',.9)]).map(h=>[h.side,h.hand.score])).toEqual([['right',.9],['left',.6]]);
-  expect(assignSides([sample('Right'),sample('Left',.9,5)]).map(h=>h.side)).toEqual(['left']);
+  expect(assignSides([sample('Left',.6),sample('Left',.9)]).map(h=>[h.side,h.hand.score])).toEqual([['left',.9],['right',.6]]);
+  expect(assignSides([sample('Right'),sample('Left',.9,5)]).map(h=>h.side)).toEqual(['right']);
   expect(assignSides(demoHands(1)).map(h=>h.side).sort()).toEqual(['left','right']);
  });
  it('the demo\'s right hand appears on the image\'s left, as when facing the camera',()=>{const [right,left]=demoHands(0);expect(right.landmarks[0].x).toBeLessThan(.5);expect(left.landmarks[0].x).toBeGreaterThan(.5)});
@@ -69,10 +75,10 @@ describe('steadier tracking',()=>{
  const hand=(label:string,x:number,score=.9):HandSample=>{const world=demoHand();return{label,score,world,landmarks:world.map((p,i)=>({...p,x:x+(i?.01:0),y:.5}))}};
  it('keeps each hand on its side when MediaPipe flips the labels for a frame',()=>{
   const seen={left:{x:.7,y:.5,t:1000},right:{x:.3,y:.5,t:1000}};
-  const flipped=trackSides([hand('Left',.71),hand('Right',.31)],seen,1033);// labels say right=.71, left=.31: swapped
+  const flipped=trackSides([hand('Right',.71),hand('Left',.31)],seen,1033);// labels say right=.71, left=.31: swapped
   expect(flipped.map(h=>[h.side,h.hand.landmarks[0].x])).toEqual([['left',.71],['right',.31]]);
-  expect(trackSides([hand('Left',.69)],seen,1033).map(h=>h.side)).toEqual(['left']);// one hand, near where the left was
-  expect(trackSides([hand('Left',.69)],seen,2000).map(h=>h.side)).toEqual(['right']);// long gone: the label decides again
+  expect(trackSides([hand('Right',.69)],seen,1033).map(h=>h.side)).toEqual(['left']);// one hand labelled right, but near where the left was
+  expect(trackSides([hand('Right',.69)],seen,2000).map(h=>h.side)).toEqual(['right']);// long gone: the label decides again
  });
  it('blends between tracker results for display, and holds the newest',()=>{
   const frame=(t:number,x:number):Frame=>({t,joints:[new T.Vector3(x,0,0)]}),out=[new T.Vector3()],frames=[frame(0,0),frame(40,4),frame(80,8)];

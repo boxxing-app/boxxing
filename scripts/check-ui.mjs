@@ -39,7 +39,7 @@ for(const [name,viewport,query] of [['portrait',{width:390,height:844},'?demo=1'
  const side=name.startsWith('landscape')?l.cam.x<l.world.x&&Math.abs(l.cam.y-l.world.y)<1:l.cam.y<l.world.y&&Math.abs(l.cam.x-l.world.x)<1;
  check(side&&Math.abs(l.cam.w*l.cam.h+l.world.w*l.world.h-l.w*l.h)<2,`${name}: camera ${name.startsWith('landscape')?'left':'top'}, 3D ${name.startsWith('landscape')?'right':'below'}, filling the screen`);
  const a=await shot(page,'world-view');await sleep(600);const b=await shot(page,'world-view');check(!a.equals(b),`${name}: the 3D hands move`);
- check(l.mirror.every(t=>t.startsWith('matrix(-1')),`${name}: front camera mirrors both views`);
+ check(l.mirror[0].startsWith('matrix(-1')&&l.mirror[1]==='none',`${name}: front camera mirrors the camera image only; the 3D view looks from your side (${l.mirror})`);
  check(!errors.length,`${name}: no console errors ${errors.join(' | ')}`);await context.close();
 }
 {const {page,context}=await open('?demo=1&camera=rear',{width:844,height:390});await sleep(1000);const l=await layout(page);check(l.mirror.every(t=>t==='none'),`rear camera is not mirrored (${l.mirror})`);await context.close()}

@@ -46,13 +46,14 @@ function renderStatus(){
 }
 setInterval(renderStatus,500);renderStatus();
 
-function applyMirror(){const mirrored=facing==='user';for(const id of ['cam-view','world-view'])$(id).classList.toggle('mirror',mirrored)}
+// Only the camera image is mirrored (front camera); the 3D view looks from your side, so it needs no mirroring.
+function applyMirror(){$('cam-view').classList.toggle('mirror',facing==='user');viewer?.setFacing(facing)}
 const aspect=()=>cfg.demo?DEMO_CAMERA.aspect:(video.videoWidth||4)/(video.videoHeight||3);
 
 function onSample(s:TrackingSample){
  const t=s.timestamp;times.push(t);inference.push(s.inferenceMs);if(times.length>30){times.shift();inference.shift()}
  const a=aspect(),f=focal(cfg.fov,a),hands=trackSides(s.hands,seen,t);current=[];
- viewer?.setCamera(f,a);const up=cameraUp(tilt.up,screenAngle(),facing);viewer?.setLevel(up?levelQuaternion(up):null);
+ const up=cameraUp(tilt.up,screenAngle(),facing);viewer?.setLevel(up?levelQuaternion(up):null);
  draw2d(hands.map(h=>({side:h.side,points:h.hand.landmarks})));
  for(const {side,hand} of hands){
   const {world,landmarks}=hand;seen[side]={x:landmarks[0].x,y:landmarks[0].y,t};

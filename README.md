@@ -11,9 +11,9 @@ Everything runs on the phone. Nothing is uploaded.
 1. Open the page. The front camera starts. If the browser asks for a tap, tap **Start camera**.
 2. Show both hands, open, for a second: the app measures your finger lengths from the first frames.
 3. Push the box with your fingers. Pinch thumb and index on it to pick it up; open them to let go or throw it.
-4. The 3D view is fixed at the phone, so the 3D hands line up with your real ones. The table appears under your hands once they are in view. Double-tap the 3D view to move it under your hands again (with a fresh box) and re-measure your fingers.
+4. The 3D view is a fixed isometric view from above and behind your hands, so your right hand is on the right; shadows show how high your hands are. The table moves under your hands when they first appear. Double-tap the 3D view to move it under your hands again (with a fresh box) and re-measure your fingers.
 
-Green is your right hand, blue your left. The status line shows each hand's distance from the phone (for example `R 42 cm · L 45 cm`). The 3D view stays level with the floor when the phone can report its tilt; on iPhone, tap the screen once to allow it. The front camera is shown mirrored, like a mirror; the data is never flipped.
+Green is your right hand, blue your left. The status line shows each hand's distance from the phone (for example `R 42 cm · L 45 cm`). The 3D view stays level with the floor when the phone can report its tilt; on iPhone, tap the screen once to allow it. The camera image from the front camera is shown mirrored, like a mirror; the data is never flipped.
 
 The distance is estimated from the camera image: browsers do not give web pages access to a phone's depth sensor. If hands look too near or too far when you orbit the 3D view, adjust `fov`.
 

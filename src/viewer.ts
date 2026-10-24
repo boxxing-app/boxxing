@@ -46,13 +46,19 @@ class HandView{
   this.group.visible=true;return true;
  }
 }
-/** The 3D view, fixed at the phone: it sees exactly what the camera sees, levelled by the phone's tilt. Your hands (rigged models)
- * and a table with a box you can push and pinch-grab. The table appears under your hands once they are in view; double-tap moves it there again. */
+/** Where the fixed view looks (level frame, phone at the origin): about where your hands are, a little below the phone. */
+const VIEW_TARGET=new T.Vector3(0,-.1,-.45);
+/** Half the height of the view, in metres. */
+const VIEW_HALF=.3;
+/** The 3D view: a fixed isometric view (orthographic, 35° down, 45° to the side) from above and behind you, as if looking down at
+ * your own hands on a desk, so your right hand is on the right. It does not move with the phone; the scene is levelled by the phone's
+ * tilt. Your hands (rigged models) and a table with a box you can push and pinch-grab. The table moves under your hands when they
+ * first appear; double-tap moves it there again. */
 export class Viewer{
- renderer:T.WebGLRenderer;scene=new T.Scene();camera=new T.PerspectiveCamera(50,1,.01,20);world=new T.Group();
+ renderer:T.WebGLRenderer;scene=new T.Scene();camera=new T.OrthographicCamera(-VIEW_HALF,VIEW_HALF,VIEW_HALF,-VIEW_HALF,.01,5);world=new T.Group();
  hands:Record<Side,HandView>={left:new HandView(COLORS.left),right:new HandView(COLORS.right)};
  box=new BoxWorld();table=new T.Group();private boxMesh:T.Mesh;private shadow:T.Mesh;private boxMaterial:T.MeshLambertMaterial;
- f=1;frameAspect=4/3;onDoubleTap=()=>{};pixelRatio:number;private maxPixelRatio:number;
+ onDoubleTap=()=>{};private handShadows:Record<Side,T.Mesh>;pixelRatio:number;private maxPixelRatio:number;
  private level=new T.Quaternion();private levelTarget=new T.Quaternion();private levelKnown=false;
  /** Smoothed tracker delay (result arrival − capture) and frame interval, in ms: the view runs this far behind to blend between results. */
  private lag=30;private interval=40;private lastT=0;
@@ -65,17 +71,20 @@ export class Viewer{
   this.maxPixelRatio=Math.min(devicePixelRatio,1.5);this.pixelRatio=this.maxPixelRatio;this.renderer.setPixelRatio(this.pixelRatio);host.appendChild(this.renderer.domElement);
   this.scene.add(new T.HemisphereLight(0xf8fff7,0x32423d,2.2));const light=new T.DirectionalLight(0xffffff,2.2);light.position.set(.3,.8,.4);this.scene.add(light);
   // The table: a dim surface with a 5 cm grid, the box, and a soft shadow under it.
-  const top=new T.Mesh(new T.PlaneGeometry(TABLE.halfX*2,TABLE.halfZ*2).rotateX(-Math.PI/2),new T.MeshLambertMaterial({color:0x22302b,transparent:true,opacity:.75}));
+  const top=new T.Mesh(new T.PlaneGeometry(TABLE.halfX*2,TABLE.halfZ*2).rotateX(-Math.PI/2),new T.MeshLambertMaterial({color:0x22302b}));
   const lines:number[]=[];for(let x=-TABLE.halfX;x<=TABLE.halfX+1e-6;x+=.05)lines.push(x,0,-TABLE.halfZ,x,0,TABLE.halfZ);for(let z=-TABLE.halfZ;z<=TABLE.halfZ+1e-6;z+=.04)lines.push(-TABLE.halfX,0,z,TABLE.halfX,0,z);
   const grid=new T.LineSegments(new T.BufferGeometry().setAttribute('position',new T.Float32BufferAttribute(lines,3)),new T.LineBasicMaterial({color:0x3f5a4e}));grid.position.y=.0005;
   this.boxMaterial=new T.MeshLambertMaterial({color:0xf4a259});this.boxMesh=new T.Mesh(new T.BoxGeometry(BOX_HALF*2,BOX_HALF*2,BOX_HALF*2),this.boxMaterial);
   this.boxMesh.add(new T.LineSegments(new T.EdgesGeometry(this.boxMesh.geometry),new T.LineBasicMaterial({color:0x5a3714})));
   this.shadow=new T.Mesh(new T.CircleGeometry(BOX_HALF*1.6,20).rotateX(-Math.PI/2),new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.35,depthWrite:false}));this.shadow.position.y=.001;
-  this.table.add(top,grid,this.shadow,this.boxMesh);this.scene.add(this.table,this.world);this.world.add(this.hands.left.group,this.hands.right.group);
+  const blob=(r:number)=>{const m=new T.Mesh(new T.CircleGeometry(r,20).rotateX(-Math.PI/2),new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.3,depthWrite:false}));m.position.y=.001;m.visible=false;return m};
+  // Soft shadows under the hands: an isometric view has no perspective, so these show how high each hand is.
+  this.handShadows={left:blob(.05),right:blob(.05)};
+  this.table.add(top,grid,this.shadow,this.handShadows.left,this.handShadows.right,this.boxMesh);this.scene.add(this.table,this.world);this.world.add(this.hands.left.group,this.hands.right.group);
   for(const side of ['left','right'] as Side[])HandModel.load(`${base}hands/${side}.glb`,SKIN[side]).then(m=>{this.hands[side].setModel(m);this.dirty=true}).catch(e=>console.warn('Hand model unavailable; showing the skeleton.',e));
   this.renderer.domElement.style.touchAction='manipulation';
   this.renderer.domElement.addEventListener('pointerup',()=>{const now=performance.now();if(now-this.lastTap<350){this.lastTap=0;this.reset();this.onDoubleTap()}else this.lastTap=now});
-  this.resize=new ResizeObserver(()=>this.fit());this.resize.observe(host);this.table.visible=false;this.fit();this.animate();
+  this.resize=new ResizeObserver(()=>this.fit());this.resize.observe(host);this.setFacing('user');this.placeUnder([VIEW_TARGET.clone().add(new T.Vector3(0,.1,0))],false);this.fit();this.animate();
  }
  /** A tracker result: joint positions in the camera frame (Three.js axes, metres), captured at time t (performance.now()). */
  update(side:Side,t:number,joints:T.Vector3[]|null,raw:T.Vector3[]|null=null){
@@ -85,12 +94,16 @@ export class Viewer{
  }
  /** Rotation from the camera frame to a level frame (from the phone's tilt), or null while unknown. The view eases toward it. */
  setLevel(level:T.Quaternion|null){if(!level)return;this.levelTarget.copy(level);if(!this.levelKnown){this.levelKnown=true;this.level.copy(level);this.reset()}}
- /** The camera's focal length (frame heights) and frame shape. The 3D view shows exactly the camera's frame, letterboxed like the image. */
- setCamera(f:number,frameAspect:number){if(Math.abs(f-this.f)<1e-6&&Math.abs(frameAspect-this.frameAspect)<1e-6)return;this.f=f;this.frameAspect=frameAspect;this.fit()}
+ /** Look from your side of the phone: behind your hands for the front camera (you face the screen), behind the phone for the rear one. */
+ setFacing(facing:'user'|'environment'){
+  const side=facing==='user'?-1:1;// your side along z, and your right along x: in the front camera's frame your right is -x
+  this.camera.position.copy(VIEW_TARGET).add(new T.Vector3(side,1,side).normalize());this.camera.up.set(0,1,0);this.camera.lookAt(VIEW_TARGET);this.dirty=true;
+ }
  /** Take the table away until your hands are in view again, then place it under them with a fresh box. */
- reset(){this.placed=false;this.handsSince=0;this.table.visible=false;this.box.reset();this.dirty=true}
- private placeUnder(palms:T.Vector3[]){const pose=tablePose(palms,new T.Vector3(0,0,-1).applyQuaternion(this.levelTarget));this.table.position.copy(pose.position);this.table.quaternion.copy(pose.quaternion);this.table.visible=true;this.placed=true;this.box.reset();this.dirty=true}
- fit(){const w=this.host.clientWidth,h=Math.max(1,this.host.clientHeight);this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.fov=2*Math.atan(Math.max(1,this.frameAspect/this.camera.aspect)/2/this.f)*180/Math.PI;this.camera.updateProjectionMatrix();this.dirty=true}
+ reset(){this.placed=false;this.handsSince=0;this.box.reset();this.dirty=true}
+ private placeUnder(palms:T.Vector3[],placed=true){const pose=tablePose(palms,new T.Vector3(0,0,-1).applyQuaternion(this.levelTarget));this.table.position.copy(pose.position);this.table.quaternion.copy(pose.quaternion);this.placed=placed;this.box.reset();this.dirty=true}
+ fit(){const w=this.host.clientWidth,h=Math.max(1,this.host.clientHeight),a=w/h,half=Math.max(VIEW_HALF,VIEW_HALF/a);this.renderer.setSize(w,h);
+  this.camera.left=-half*a;this.camera.right=half*a;this.camera.top=half;this.camera.bottom=-half;this.camera.updateProjectionMatrix();this.dirty=true}
  /** Lower the resolution when frames take too long, raise it again when there is room. */
  private adapt(dt:number){
   this.frameTimes.push(dt);if(this.frameTimes.length<60)return;
@@ -102,7 +115,7 @@ export class Viewer{
  private animate=()=>{
   const now=performance.now(),dt=this.lastFrame?(now-this.lastFrame)/1000:1/60;this.lastFrame=now;
   const turning=this.level.angleTo(this.levelTarget)>1e-4;if(turning)this.level.slerp(this.levelTarget,.15);
-  this.world.quaternion.copy(this.level);this.camera.quaternion.copy(this.level);
+  this.world.quaternion.copy(this.level);
   const at=now-this.lag-this.interval;let shown=false;for(const h of Object.values(this.hands)){const was=h.visible;shown=h.draw(at,now)||shown;if(was!==h.visible)this.dirty=true}
   // Physics in the table's frame: hands go camera frame → level → table.
   const toTable=this.table.quaternion.clone().invert(),hands=(['left','right'] as Side[]).filter(s=>this.hands[s].visible).map(side=>({side,joints:this.hands[side].shown.map(p=>p.clone().applyQuaternion(this.level).sub(this.table.position).applyQuaternion(toTable))}));
@@ -110,7 +123,8 @@ export class Viewer{
    if(!hands.length)this.handsSince=0;else if(!this.handsSince)this.handsSince=now;
    else if(now-this.handsSince>300)this.placeUnder((['left','right'] as Side[]).filter(side=>this.hands[side].visible).map(side=>this.hands[side].shown[9].clone().applyQuaternion(this.level)));
   }
-  const busy=this.placed&&(this.box.moving||hands.length>0);
+  for(const side of ['left','right'] as Side[]){const s=this.handShadows[side],h=hands.find(x=>x.side===side);s.visible=!!h;if(h){const palm=h.joints[0].clone().add(h.joints[9]).multiplyScalar(.5),height=Math.max(0,palm.y);s.position.set(palm.x,.001,palm.z);(s.material as T.MeshBasicMaterial).opacity=.3*Math.max(0,1-height/.35)}}
+  const busy=this.box.moving||hands.length>0;
   if(busy){
    this.box.step(dt,hands);this.boxMesh.position.copy(this.box.pos);this.boxMesh.quaternion.copy(this.box.quat);
    this.boxMaterial.color.setHex(this.box.grabbed?0xffd166:hands.some(h=>this.box.isPinching(h.side))?0xf7b97a:0xf4a259);
